@@ -444,6 +444,18 @@ export default function App() {
     }
   };
 
+  // ============================================================
+  // 管理員後台
+  // ============================================================
+  if (view === 'admin' && adminUser) return (
+    <AdminPanel
+      adminUser={adminUser}
+      onLogout={() => { signOut(auth); setView('entry'); setAdminUser(null); }}
+      db={db}
+      rtdb={rtdb}
+    />
+  );
+  
   // --- 入口畫面 ---
   if (view === 'entry' || !userData) return (
     <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, overflow: 'hidden', position: 'relative', background: 'linear-gradient(160deg, #0f2922 0%, #134e3a 40%, #1a3a4a 100%)' }}>
@@ -506,18 +518,6 @@ export default function App() {
         @keyframes fadeSlideUp { from { opacity:0; transform:translateY(24px); } to { opacity:1; transform:translateY(0); } }
       `}</style>
     </div>
-  );
-
-  // ============================================================
-  // 管理員後台
-  // ============================================================
-  if (view === 'admin' && adminUser) return (
-    <AdminPanel
-      adminUser={adminUser}
-      onLogout={() => { signOut(auth); setView('entry'); setAdminUser(null); }}
-      db={db}
-      rtdb={rtdb}
-    />
   );
 
   // ============================================================
