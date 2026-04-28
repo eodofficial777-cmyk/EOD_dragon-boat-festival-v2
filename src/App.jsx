@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { db, rtdb, auth, googleProvider } from './firebase';
 import { collection, doc, getDoc, getDocs, setDoc, updateDoc, addDoc, query, orderBy, where, onSnapshot, arrayUnion, increment as fsIncrement, Timestamp } from 'firebase/firestore';
 import { ref, onValue, runTransaction } from 'firebase/database';
-import { signInWithPopup, signOut, onAuthStateChanged } from 'firebase/auth';
+import { signInWithRedirect, signOut, onAuthStateChanged, getRedirectResult } from 'firebase/auth';
 
 // ★ 管理員 UID（第一次登入後到 Firebase Console → Authentication 找你的 UID 填進來）
 const ADMIN_UID = 'aYe1g9g27SViRei2gjAxTQmt5s13';
@@ -120,6 +120,12 @@ export default function App() {
   // 監聽管理員登入狀態
   // ============================================================
   useEffect(() => {
+    getRedirectResult(auth).then((result) => {
+      if (result?.user?.uid === ADMIN_UID) {
+        setAdminUser(result.user);
+        setView('admin');
+      }
+    }).catch(() => {});
     const unsub = onAuthStateChanged(auth, (user) => {
       if (user && user.uid === ADMIN_UID) {
         setAdminUser(user);
@@ -482,7 +488,7 @@ export default function App() {
           {/* 管理員入口 */}
           <button onClick={async () => {
             try {
-              await signInWithPopup(auth, googleProvider);
+              await signInWithRedirect(auth, googleProvider);
               setView('admin');
             } catch (err) { showMsg('管理員登入失敗', 'warn'); }
           }} style={{ width: '100%', marginTop: 8, padding: '10px 0', background: 'transparent', color: 'rgba(167,215,195,0.3)', fontSize: 10, fontWeight: 700, border: '1px solid rgba(255,255,255,0.05)', borderRadius: 12, cursor: 'pointer', letterSpacing: 1 }}>
