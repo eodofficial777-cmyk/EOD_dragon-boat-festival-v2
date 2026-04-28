@@ -129,6 +129,7 @@ export default function App() {
     const unsub = onAuthStateChanged(auth, (user) => {
       if (user && user.uid === ADMIN_UID) {
         setAdminUser(user);
+        setView('admin');
       } else {
         setAdminUser(null);
       }
