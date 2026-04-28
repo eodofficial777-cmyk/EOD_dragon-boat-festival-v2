@@ -450,11 +450,31 @@ export default function App() {
   if (view === 'admin' && adminUser) return (
     <AdminPanel
       adminUser={adminUser}
-      onLogout={async () => { await signOut(auth); setAdminUser(null); setUserData(null); setView('entry'); }}
+      onLogout={async (mode) => {
+        if (mode === 'preview') {
+          const name = '管理員預覽';
+          setUserData({ username: name, pin: '0000', coins: 9999, inventory: [], stamps: [], isDemo: true });
+          setView('home');
+        } else {
+          await signOut(auth); setAdminUser(null); setUserData(null); setView('entry');
+        }
+      }}
       db={db}
       rtdb={rtdb}
     />
   );
+
+  const adminFloatingBtn = (adminUser && view !== 'admin') ? (
+    <button onClick={() => setView('admin')} style={{
+      position: 'fixed', bottom: 100, right: 16, zIndex: 999,
+      padding: '10px 16px', borderRadius: 16,
+      background: 'linear-gradient(135deg, #1e40af, #3b82f6)',
+      color: '#fff', fontSize: 11, fontWeight: 800,
+      border: 'none', cursor: 'pointer',
+      boxShadow: '0 4px 20px rgba(59,130,246,0.4)',
+      display: 'flex', alignItems: 'center', gap: 6
+    }}>🔐 回管理後台</button>
+  ) : null;
   
   // --- 入口畫面 ---
   if (view === 'entry' || !userData) return (
@@ -522,6 +542,7 @@ export default function App() {
   // ============================================================
   return (
     <div style={{ minHeight: '100vh', background: '#f8f7f4', fontFamily: '"Noto Sans TC",-apple-system,sans-serif', paddingBottom: 88, overflow: 'hidden' }}>
+    {adminFloatingBtn}
       {/* Header */}
       <header style={{ position: 'sticky', top: 0, zIndex: 40, background: 'rgba(255,255,255,0.92)', backdropFilter: 'blur(20px)', borderBottom: '1px solid rgba(0,0,0,0.06)', padding: '12px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -1496,7 +1517,7 @@ function AdminPanel({ adminUser, onLogout, db, rtdb }) {
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
-          <button onClick={async () => { await signOut(auth); window.location.reload(); }} style={{ padding: '6px 12px', borderRadius: 8, border: '1px solid #374151', background: 'transparent', color: '#9ca3af', fontSize: 11, cursor: 'pointer', fontWeight: 700 }}>← 回玩家頁</button>
+          <button onClick={() => { onLogout('preview'); }} style={{ padding: '6px 12px', borderRadius: 8, border: '1px solid #374151', background: 'transparent', color: '#9ca3af', fontSize: 11, cursor: 'pointer', fontWeight: 700 }}>👁 預覽玩家頁</button>
           <button onClick={onLogout} style={{ padding: '6px 12px', borderRadius: 8, border: '1px solid #374151', background: 'transparent', color: '#ef4444', fontSize: 11, cursor: 'pointer', fontWeight: 700 }}>登出</button>
         </div>
       </header>
