@@ -5,7 +5,7 @@ import { ref, onValue, runTransaction } from 'firebase/database';
 import { signInWithPopup, signOut, onAuthStateChanged } from 'firebase/auth';
 
 // ★ 管理員 UID（第一次登入後到 Firebase Console → Authentication 找你的 UID 填進來）
-const ADMIN_UID = 'PASTE_YOUR_UID_HERE';
+const ADMIN_UID = 'aYe1g9g27SViRei2gjAxTQmt5s13';
 
 // ============================================================
 // 印章元件 - 只需提供噗浪圖床網址即可
