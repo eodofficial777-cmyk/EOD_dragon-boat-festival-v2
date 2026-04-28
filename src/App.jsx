@@ -450,7 +450,7 @@ export default function App() {
   if (view === 'admin' && adminUser) return (
     <AdminPanel
       adminUser={adminUser}
-      onLogout={() => { signOut(auth); setView('entry'); setAdminUser(null); }}
+      onLogout={async () => { await signOut(auth); setAdminUser(null); setUserData(null); setView('entry'); }}
       db={db}
       rtdb={rtdb}
     />
@@ -499,11 +499,8 @@ export default function App() {
           </button>
 
           {/* 管理員入口 */}
-          <button onClick={async () => {
-            try {
-              await signInWithRedirect(auth, googleProvider);
-              setView('admin');
-            } catch (err) { showMsg('管理員登入失敗', 'warn'); }
+          <button onClick={() => {
+            signInWithRedirect(auth, googleProvider);
           }} style={{ width: '100%', marginTop: 8, padding: '10px 0', background: 'transparent', color: 'rgba(167,215,195,0.3)', fontSize: 10, fontWeight: 700, border: '1px solid rgba(255,255,255,0.05)', borderRadius: 12, cursor: 'pointer', letterSpacing: 1 }}>
             🔐 管理員入口
           </button>
@@ -1499,7 +1496,7 @@ function AdminPanel({ adminUser, onLogout, db, rtdb }) {
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
-          <button onClick={() => window.location.hash = ''} style={{ padding: '6px 12px', borderRadius: 8, border: '1px solid #374151', background: 'transparent', color: '#9ca3af', fontSize: 11, cursor: 'pointer', fontWeight: 700 }}>← 回玩家頁</button>
+          <button onClick={async () => { await signOut(auth); window.location.reload(); }} style={{ padding: '6px 12px', borderRadius: 8, border: '1px solid #374151', background: 'transparent', color: '#9ca3af', fontSize: 11, cursor: 'pointer', fontWeight: 700 }}>← 回玩家頁</button>
           <button onClick={onLogout} style={{ padding: '6px 12px', borderRadius: 8, border: '1px solid #374151', background: 'transparent', color: '#ef4444', fontSize: 11, cursor: 'pointer', fontWeight: 700 }}>登出</button>
         </div>
       </header>
