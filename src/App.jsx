@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { db, rtdb, auth, googleProvider } from './firebase';
-import { collection, doc, getDoc, getDocs, setDoc, updateDoc, addDoc, query, orderBy, where, onSnapshot, arrayUnion, increment as fsIncrement, Timestamp } from 'firebase/firestore';
-import { ref, onValue, runTransaction } from 'firebase/database';
+import { collection, doc, getDoc, getDocs, setDoc, updateDoc, addDoc, deleteDoc, query, orderBy, where, onSnapshot, arrayUnion, increment as fsIncrement, Timestamp } from 'firebase/firestore';
+import { ref, onValue, runTransaction, set as rtdbSet, remove as rtdbRemove } from 'firebase/database';
 import { signInWithPopup, signOut, onAuthStateChanged } from 'firebase/auth';
 
 // ★ 管理員 UID（第一次登入後到 Firebase Console → Authentication 找你的 UID 填進來）
@@ -1430,46 +1430,72 @@ function AdminPanel({ adminUser, onLogout, db, rtdb }) {
   const [tab, setTab] = useState('dashboard');
   const [stats, setStats] = useState({ booths: 0, players: 0, stamps: 0, sales: 0 });
   const [players, setPlayers] = useState([]);
+  const [boothsList, setBoothsList] = useState([]);
   const [raceData, setRaceData] = useState({});
   const [settings, setSettings] = useState({ registrationOpen: true, registrationClosedMsg: '' });
-  const [editTeamId, setEditTeamId] = useState(null);
   const [rollsInput, setRollsInput] = useState({});
   const [msg, setMsg] = useState(null);
+  // 攤位編輯
+  const [editBooth, setEditBooth] = useState(null);
+  const [editItems, setEditItems] = useState([]);
+  // 龍舟編輯
+  const [newTeam, setNewTeam] = useState({ name: '', color: '#dc2626', flagImageUrl: '' });
+  // 玩家批次建立
+  const [batchNames, setBatchNames] = useState('');
+  const [batchPin, setBatchPin] = useState('1234');
+  const [batchCoins, setBatchCoins] = useState(500);
 
   const showAdminMsg = (text) => { setMsg(text); setTimeout(() => setMsg(null), 3000); };
 
-  // 載入總覽
-  useEffect(() => {
-    const load = async () => {
-      try {
-        const [boothSnap, playerSnap, stampSnap, settingsSnap] = await Promise.all([
-          getDocs(collection(db, 'booths')),
-          getDocs(collection(db, 'players')),
-          getDocs(collection(db, 'stampLogs')),
-          getDoc(doc(db, 'settings', 'general'))
-        ]);
-        let totalSales = 0;
-        playerSnap.docs.forEach(d => {
-          (d.data().inventory || []).forEach(item => { totalSales += Number(item.price) || 0; });
-        });
-        setStats({ booths: boothSnap.size, players: playerSnap.size, stamps: stampSnap.size, sales: totalSales });
-        setPlayers(playerSnap.docs.map(d => ({ username: d.id, ...d.data() })));
-        if (settingsSnap.exists()) setSettings(settingsSnap.data());
-      } catch (err) { console.error('載入失敗:', err); }
-    };
-    load();
-  }, [db]);
+  const inputStyle = { width: '100%', boxSizing: 'border-box', padding: '10px 12px', background: '#374151', border: '1px solid #4b5563', borderRadius: 8, color: '#e2e8f0', fontSize: 13, outline: 'none' };
+  const btnPrimary = { padding: '8px 20px', borderRadius: 8, border: 'none', background: '#3b82f6', color: '#fff', fontSize: 12, fontWeight: 700, cursor: 'pointer' };
+  const btnDanger = { ...btnPrimary, background: '#7f1d1d', color: '#fca5a5' };
+  const btnGhost = { padding: '4px 10px', borderRadius: 6, border: '1px solid #374151', background: 'transparent', color: '#60a5fa', fontSize: 10, cursor: 'pointer', fontWeight: 700 };
+  const cardStyle = { background: '#1f2937', borderRadius: 12, padding: 16, marginBottom: 8, border: '1px solid #374151' };
+  const labelStyle = { fontSize: 11, fontWeight: 700, color: '#9ca3af', display: 'block', marginBottom: 4, marginTop: 12 };
+
+  // === 載入所有資料 ===
+  const loadAll = async () => {
+    try {
+      const [boothSnap, playerSnap, stampSnap, settingsSnap] = await Promise.all([
+        getDocs(collection(db, 'booths')),
+        getDocs(collection(db, 'players')),
+        getDocs(collection(db, 'stampLogs')),
+        getDoc(doc(db, 'settings', 'general'))
+      ]);
+      let totalSales = 0;
+      playerSnap.docs.forEach(d => {
+        (d.data().inventory || []).forEach(item => { totalSales += Number(item.price) || 0; });
+      });
+      setStats({ booths: boothSnap.size, players: playerSnap.size, stamps: stampSnap.size, sales: totalSales });
+      setPlayers(playerSnap.docs.map(d => ({ username: d.id, ...d.data() })));
+      // 攤位含商品
+      const bList = [];
+      for (const bd of boothSnap.docs) {
+        const itemSnap = await getDocs(collection(db, 'booths', bd.id, 'items'));
+        bList.push({ id: bd.id, ...bd.data(), items: itemSnap.docs.map(d => ({ id: d.id, ...d.data() })) });
+      }
+      setBoothsList(bList);
+      // 設定（自動建立）
+      if (settingsSnap.exists()) {
+        setSettings(settingsSnap.data());
+      } else {
+        const defaultSettings = { registrationOpen: true, registrationClosedMsg: '目前尚未開放新玩家登記' };
+        await setDoc(doc(db, 'settings', 'general'), defaultSettings);
+        setSettings(defaultSettings);
+      }
+    } catch (err) { console.error('載入失敗:', err); }
+  };
+
+  useEffect(() => { loadAll(); }, [db]);
 
   // 即時監聽龍舟
   useEffect(() => {
-    const raceRef = ref(rtdb, 'race');
-    const unsub = onValue(raceRef, (snap) => {
-      setRaceData(snap.val() || {});
-    });
+    const unsub = onValue(ref(rtdb, 'race'), (snap) => setRaceData(snap.val() || {}));
     return () => unsub();
   }, [rtdb]);
 
-  // 龍舟結算
+  // === 龍舟操作 ===
   const processTeamRolls = async (teamId) => {
     const team = raceData[teamId];
     const input = rollsInput[teamId] || '';
@@ -1477,51 +1503,91 @@ function AdminPanel({ adminUser, onLogout, db, rtdb }) {
     const rolls = input.split(',').map(n => parseInt(n)).filter(n => !isNaN(n));
     const rollSum = rolls.reduce((a, b) => a + b, 0);
     if (rollSum === 0) return showAdminMsg('骰數總和為 0');
-
     let outbound = Number(team.outboundScore) || 0;
     let inbound = Number(team.inboundScore) || 0;
     let turned = team.turnSuccess === true;
     let note = '';
-
     if (outbound >= 200 && inbound >= 200) return showAdminMsg('此隊已完賽');
-
     if (!turned) {
       outbound += rollSum;
-      if (outbound >= 200) {
-        const overflow = outbound - 200;
-        outbound = 200; turned = true; note = '🚩 折返！';
-        if (overflow > 0) { inbound += overflow; if (inbound >= 200) { inbound = 200; note += ' 🏆 完賽！'; } }
-      }
-    } else {
-      inbound += rollSum;
-      if (inbound >= 200) { inbound = 200; note = '🏆 完賽！'; }
-    }
-
+      if (outbound >= 200) { const ov = outbound - 200; outbound = 200; turned = true; note = '🚩 折返！'; if (ov > 0) { inbound += ov; if (inbound >= 200) { inbound = 200; note += ' 🏆 完賽！'; } } }
+    } else { inbound += rollSum; if (inbound >= 200) { inbound = 200; note = '🏆 完賽！'; } }
     try {
-      const { set: rtdbSet } = await import('firebase/database');
-      const teamRef = ref(rtdb, `race/${teamId}`);
-      await rtdbSet(teamRef, { ...team, outboundScore: outbound, inboundScore: inbound, turnSuccess: turned, lastRolls: input });
+      await rtdbSet(ref(rtdb, `race/${teamId}`), { ...team, outboundScore: outbound, inboundScore: inbound, turnSuccess: turned, lastRolls: input });
       setRollsInput(prev => ({ ...prev, [teamId]: '' }));
       showAdminMsg(`${team.name}：+${rollSum} ${note || '已更新'}`);
     } catch (err) { showAdminMsg('更新失敗：' + err.message); }
   };
 
-  // 重置比賽
+  const addTeam = async () => {
+    if (!newTeam.name.trim()) return showAdminMsg('請輸入隊伍名稱');
+    const teamId = 'team-' + Date.now();
+    try {
+      await rtdbSet(ref(rtdb, `race/${teamId}`), {
+        name: newTeam.name.trim(), color: newTeam.color, flagImageUrl: newTeam.flagImageUrl || '',
+        outboundScore: 0, inboundScore: 0, turnSuccess: false, cheers: 0, lastRolls: ''
+      });
+      setNewTeam({ name: '', color: '#dc2626', flagImageUrl: '' });
+      showAdminMsg(`✅ 已新增隊伍「${newTeam.name}」`);
+    } catch (err) { showAdminMsg('新增失敗：' + err.message); }
+  };
+
+  const deleteTeam = async (teamId, teamName) => {
+    if (!confirm(`確定要刪除「${teamName}」嗎？`)) return;
+    try {
+      await rtdbRemove(ref(rtdb, `race/${teamId}`));
+      showAdminMsg(`已刪除「${teamName}」`);
+    } catch (err) { showAdminMsg('刪除失敗：' + err.message); }
+  };
+
   const resetRace = async () => {
     if (!confirm('確定要重置所有隊伍的分數嗎？')) return;
     try {
-      const { set: rtdbSet } = await import('firebase/database');
       const updates = {};
-      Object.entries(raceData).forEach(([id, team]) => {
-        updates[id] = { ...team, outboundScore: 0, inboundScore: 0, turnSuccess: false, lastRolls: '' };
-      });
-      const raceRef = ref(rtdb, 'race');
-      await rtdbSet(raceRef, updates);
+      Object.entries(raceData).forEach(([id, team]) => { updates[id] = { ...team, outboundScore: 0, inboundScore: 0, turnSuccess: false, lastRolls: '' }; });
+      await rtdbSet(ref(rtdb, 'race'), updates);
       showAdminMsg('✅ 比賽已重置');
     } catch (err) { showAdminMsg('重置失敗：' + err.message); }
   };
 
-  // 更新設定
+  // === 攤位操作 ===
+  const startEditBooth = (booth) => {
+    setEditBooth(booth ? { ...booth } : { id: '', side: 'top', name: '', owner: '', emoji: '🏮', description: '', plurkUrl: '', task: '', facadeImageUrl: '', stampImageUrl: '', order: boothsList.length + 1 });
+    setEditItems(booth?.items || []);
+  };
+
+  const saveBooth = async () => {
+    if (!editBooth.name.trim()) return showAdminMsg('請輸入攤位名稱');
+    const boothId = editBooth.id || ('booth-' + Date.now());
+    try {
+      const { items, id, ...boothData } = editBooth;
+      await setDoc(doc(db, 'booths', boothId), boothData);
+      // 儲存商品：先刪除舊的，再寫入新的
+      const existingItems = await getDocs(collection(db, 'booths', boothId, 'items'));
+      for (const d of existingItems.docs) { await deleteDoc(doc(db, 'booths', boothId, 'items', d.id)); }
+      for (const item of editItems) {
+        const itemId = item.id || ('item-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6));
+        await setDoc(doc(db, 'booths', boothId, 'items', itemId), { name: item.name || '', price: Number(item.price) || 0, description: item.description || '', imageUrl: item.imageUrl || '' });
+      }
+      setEditBooth(null);
+      setEditItems([]);
+      await loadAll();
+      showAdminMsg(`✅ 攤位「${boothData.name}」已儲存`);
+    } catch (err) { showAdminMsg('儲存失敗：' + err.message); }
+  };
+
+  const deleteBooth = async (boothId, name) => {
+    if (!confirm(`確定要刪除「${name}」嗎？商品也會一起刪除。`)) return;
+    try {
+      const itemSnap = await getDocs(collection(db, 'booths', boothId, 'items'));
+      for (const d of itemSnap.docs) { await deleteDoc(doc(db, 'booths', boothId, 'items', d.id)); }
+      await deleteDoc(doc(db, 'booths', boothId));
+      await loadAll();
+      showAdminMsg(`已刪除「${name}」`);
+    } catch (err) { showAdminMsg('刪除失敗：' + err.message); }
+  };
+
+  // === 設定 ===
   const saveSettings = async () => {
     try {
       await setDoc(doc(db, 'settings', 'general'), settings);
@@ -1529,7 +1595,7 @@ function AdminPanel({ adminUser, onLogout, db, rtdb }) {
     } catch (err) { showAdminMsg('儲存失敗：' + err.message); }
   };
 
-  // 修改玩家金幣
+  // === 玩家操作 ===
   const updatePlayerCoins = async (username, newCoins) => {
     try {
       await updateDoc(doc(db, 'players', username), { coins: Number(newCoins) });
@@ -1538,16 +1604,33 @@ function AdminPanel({ adminUser, onLogout, db, rtdb }) {
     } catch (err) { showAdminMsg('更新失敗'); }
   };
 
+  const batchCreatePlayers = async () => {
+    const names = batchNames.split('\n').map(n => n.trim()).filter(n => n);
+    if (!names.length) return showAdminMsg('請輸入至少一個玩家名稱');
+    if (batchPin.length < 4) return showAdminMsg('密碼至少 4 位');
+    let created = 0, skipped = 0;
+    for (const name of names) {
+      const existing = await getDoc(doc(db, 'players', name));
+      if (existing.exists()) { skipped++; continue; }
+      await setDoc(doc(db, 'players', name), { pin: batchPin, coins: Number(batchCoins) || 500, inventory: [], stamps: [], createdAt: Timestamp.now() });
+      created++;
+    }
+    setBatchNames('');
+    await loadAll();
+    showAdminMsg(`✅ 建立 ${created} 個玩家` + (skipped > 0 ? `，${skipped} 個已存在跳過` : ''));
+  };
+
+  const COLORS = ['#dc2626','#2563eb','#16a34a','#9333ea','#ea580c','#0891b2','#c026d3','#65a30d','#e11d48','#0d9488'];
   const tabs = [
-    { id: 'dashboard', label: '📊 總覽', },
-    { id: 'race', label: '🐉 龍舟', },
-    { id: 'settings', label: '🔒 設定', },
-    { id: 'players', label: '👥 玩家', },
+    { id: 'dashboard', label: '📊 總覽' },
+    { id: 'booths', label: '🏪 攤位' },
+    { id: 'race', label: '🐉 龍舟' },
+    { id: 'settings', label: '🔒 設定' },
+    { id: 'players', label: '👥 玩家' },
   ];
 
   return (
     <div style={{ minHeight: '100vh', background: '#111827', color: '#e2e8f0', fontFamily: '"Noto Sans TC",-apple-system,sans-serif' }}>
-      {/* Header */}
       <header style={{ background: '#1f2937', padding: '12px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #374151' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <span style={{ fontSize: 20 }}>🔐</span>
@@ -1557,38 +1640,36 @@ function AdminPanel({ adminUser, onLogout, db, rtdb }) {
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
-          <button onClick={() => { onLogout('preview'); }} style={{ padding: '6px 12px', borderRadius: 8, border: '1px solid #374151', background: 'transparent', color: '#9ca3af', fontSize: 11, cursor: 'pointer', fontWeight: 700 }}>👁 預覽玩家頁</button>
-          <button onClick={onLogout} style={{ padding: '6px 12px', borderRadius: 8, border: '1px solid #374151', background: 'transparent', color: '#ef4444', fontSize: 11, cursor: 'pointer', fontWeight: 700 }}>登出</button>
+          <button onClick={() => { onLogout('preview'); }} style={{ ...btnGhost, color: '#9ca3af' }}>👁 預覽玩家頁</button>
+          <button onClick={onLogout} style={{ ...btnGhost, color: '#ef4444' }}>登出</button>
         </div>
       </header>
 
-      {/* Tabs */}
-      <div style={{ display: 'flex', gap: 4, padding: '12px 20px', background: '#1f2937', borderBottom: '1px solid #374151' }}>
+      <div style={{ display: 'flex', gap: 4, padding: '12px 20px', background: '#1f2937', borderBottom: '1px solid #374151', overflowX: 'auto' }}>
         {tabs.map(t => (
-          <button key={t.id} onClick={() => setTab(t.id)} style={{
-            padding: '8px 16px', borderRadius: 8, border: 'none', fontSize: 12, fontWeight: 700, cursor: 'pointer',
-            background: tab === t.id ? '#3b82f6' : 'transparent',
-            color: tab === t.id ? '#fff' : '#9ca3af'
-          }}>{t.label}</button>
+          <button key={t.id} onClick={() => setTab(t.id)} style={{ padding: '8px 16px', borderRadius: 8, border: 'none', fontSize: 12, fontWeight: 700, cursor: 'pointer', flexShrink: 0, background: tab === t.id ? '#3b82f6' : 'transparent', color: tab === t.id ? '#fff' : '#9ca3af' }}>{t.label}</button>
         ))}
       </div>
 
-      {/* Toast */}
       {msg && <div style={{ position: 'fixed', top: 16, right: 16, background: '#10b981', color: '#fff', padding: '10px 20px', borderRadius: 12, fontSize: 13, fontWeight: 700, zIndex: 100, boxShadow: '0 8px 24px rgba(0,0,0,0.3)' }}>{msg}</div>}
 
       <div style={{ padding: 20, maxWidth: 900, margin: '0 auto' }}>
-        {/* Dashboard */}
+
+        {/* ===== 總覽 ===== */}
         {tab === 'dashboard' && (
           <div>
-            <h2 style={{ fontSize: 20, fontWeight: 900, marginBottom: 16 }}>📊 活動總覽</h2>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 24 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <h2 style={{ fontSize: 20, fontWeight: 900 }}>📊 活動總覽</h2>
+              <button onClick={loadAll} style={btnGhost}>🔄 重新整理</button>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
               {[
                 { label: '攤位數', value: stats.booths, icon: '🏪', color: '#3b82f6' },
                 { label: '玩家數', value: stats.players, icon: '👥', color: '#10b981' },
                 { label: '總集章', value: stats.stamps, icon: '🏆', color: '#f59e0b' },
                 { label: '總銷售', value: `$${stats.sales}`, icon: '💰', color: '#ef4444' },
               ].map((s, i) => (
-                <div key={i} style={{ background: '#1f2937', borderRadius: 16, padding: 16, textAlign: 'center', border: '1px solid #374151' }}>
+                <div key={i} style={{ ...cardStyle, textAlign: 'center' }}>
                   <div style={{ fontSize: 24, marginBottom: 4 }}>{s.icon}</div>
                   <div style={{ fontSize: 28, fontWeight: 900, color: s.color, fontFamily: 'monospace' }}>{s.value}</div>
                   <div style={{ fontSize: 10, color: '#6b7280', fontWeight: 700, marginTop: 4 }}>{s.label}</div>
@@ -1598,83 +1679,197 @@ function AdminPanel({ adminUser, onLogout, db, rtdb }) {
           </div>
         )}
 
-        {/* Race Control */}
+        {/* ===== 攤位管理 ===== */}
+        {tab === 'booths' && !editBooth && (
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <h2 style={{ fontSize: 20, fontWeight: 900 }}>🏪 攤位管理（{boothsList.length} 攤）</h2>
+              <button onClick={() => startEditBooth(null)} style={btnPrimary}>＋ 新增攤位</button>
+            </div>
+            {boothsList.map(b => (
+              <div key={b.id} style={{ ...cardStyle, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <span style={{ fontSize: 28 }}>{b.emoji}</span>
+                  <div>
+                    <p style={{ fontWeight: 800, fontSize: 14 }}>{b.name}</p>
+                    <p style={{ fontSize: 10, color: '#6b7280' }}>攤主：{b.owner} ・ {b.side === 'top' ? '上排' : '下排'} ・ {b.items?.length || 0} 件商品</p>
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <button onClick={() => startEditBooth(b)} style={btnGhost}>✏️ 編輯</button>
+                  <button onClick={() => deleteBooth(b.id, b.name)} style={{ ...btnGhost, color: '#f87171' }}>🗑 刪除</button>
+                </div>
+              </div>
+            ))}
+            {boothsList.length === 0 && <p style={{ textAlign: 'center', color: '#6b7280', padding: 40 }}>尚無攤位，點右上角「＋ 新增攤位」開始建立</p>}
+          </div>
+        )}
+
+        {/* 攤位編輯表單 */}
+        {tab === 'booths' && editBooth && (
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <h2 style={{ fontSize: 20, fontWeight: 900 }}>{editBooth.id ? '✏️ 編輯攤位' : '＋ 新增攤位'}</h2>
+              <button onClick={() => { setEditBooth(null); setEditItems([]); }} style={btnGhost}>✕ 取消</button>
+            </div>
+            <div style={cardStyle}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div>
+                  <label style={labelStyle}>攤位名稱 *</label>
+                  <input value={editBooth.name} onChange={e => setEditBooth(prev => ({ ...prev, name: e.target.value }))} style={inputStyle} placeholder="例：五月花粽" />
+                </div>
+                <div>
+                  <label style={labelStyle}>攤主暱稱</label>
+                  <input value={editBooth.owner} onChange={e => setEditBooth(prev => ({ ...prev, owner: e.target.value }))} style={inputStyle} placeholder="擺攤的玩家名字" />
+                </div>
+                <div>
+                  <label style={labelStyle}>位置</label>
+                  <select value={editBooth.side} onChange={e => setEditBooth(prev => ({ ...prev, side: e.target.value }))} style={inputStyle}>
+                    <option value="top">上排（河道上方）</option>
+                    <option value="bottom">下排（河道下方）</option>
+                  </select>
+                </div>
+                <div>
+                  <label style={labelStyle}>Emoji 圖示</label>
+                  <input value={editBooth.emoji} onChange={e => setEditBooth(prev => ({ ...prev, emoji: e.target.value }))} style={inputStyle} placeholder="🍱" />
+                </div>
+              </div>
+              <label style={labelStyle}>攤位介紹</label>
+              <textarea value={editBooth.description} onChange={e => setEditBooth(prev => ({ ...prev, description: e.target.value }))} style={{ ...inputStyle, minHeight: 60, resize: 'vertical' }} placeholder="攤位的故事、特色..." />
+              <label style={labelStyle}>噗浪攤位網址</label>
+              <input value={editBooth.plurkUrl} onChange={e => setEditBooth(prev => ({ ...prev, plurkUrl: e.target.value }))} style={inputStyle} placeholder="https://www.plurk.com/p/..." />
+              <label style={labelStyle}>集章任務說明</label>
+              <input value={editBooth.task} onChange={e => setEditBooth(prev => ({ ...prev, task: e.target.value }))} style={inputStyle} placeholder="例：在噗浪留言即可集章" />
+              <label style={labelStyle}>封面圖（噗浪圖床網址）</label>
+              <input value={editBooth.facadeImageUrl} onChange={e => setEditBooth(prev => ({ ...prev, facadeImageUrl: e.target.value }))} style={inputStyle} placeholder="https://images.plurk.com/xxx.jpg" />
+              <label style={labelStyle}>印章圖（噗浪圖床網址，留空用 emoji）</label>
+              <input value={editBooth.stampImageUrl} onChange={e => setEditBooth(prev => ({ ...prev, stampImageUrl: e.target.value }))} style={inputStyle} placeholder="https://images.plurk.com/stamp.png" />
+
+              {/* 商品管理 */}
+              <div style={{ marginTop: 20, borderTop: '1px solid #374151', paddingTop: 16 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                  <p style={{ fontWeight: 800, fontSize: 14 }}>🛒 商品列表</p>
+                  <button onClick={() => setEditItems(prev => [...prev, { id: '', name: '', price: 0, description: '', imageUrl: '' }])} style={btnGhost}>＋ 新增商品</button>
+                </div>
+                {editItems.map((item, idx) => (
+                  <div key={idx} style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'center' }}>
+                    <input value={item.name} onChange={e => { const arr = [...editItems]; arr[idx] = { ...arr[idx], name: e.target.value }; setEditItems(arr); }} style={{ ...inputStyle, flex: 2 }} placeholder="商品名稱" />
+                    <input type="number" value={item.price} onChange={e => { const arr = [...editItems]; arr[idx] = { ...arr[idx], price: e.target.value }; setEditItems(arr); }} style={{ ...inputStyle, width: 80, flex: 0 }} placeholder="價格" />
+                    <input value={item.description} onChange={e => { const arr = [...editItems]; arr[idx] = { ...arr[idx], description: e.target.value }; setEditItems(arr); }} style={{ ...inputStyle, flex: 2 }} placeholder="說明" />
+                    <input value={item.imageUrl || ''} onChange={e => { const arr = [...editItems]; arr[idx] = { ...arr[idx], imageUrl: e.target.value }; setEditItems(arr); }} style={{ ...inputStyle, flex: 2 }} placeholder="圖片網址" />
+                    <button onClick={() => setEditItems(prev => prev.filter((_, i) => i !== idx))} style={{ ...btnGhost, color: '#f87171', flexShrink: 0 }}>✕</button>
+                  </div>
+                ))}
+                {editItems.length === 0 && <p style={{ fontSize: 11, color: '#6b7280' }}>尚無商品。點「＋ 新增商品」加入。</p>}
+              </div>
+
+              <button onClick={saveBooth} style={{ ...btnPrimary, width: '100%', marginTop: 20, padding: '14px 0', fontSize: 14 }}>💾 儲存攤位</button>
+            </div>
+          </div>
+        )}
+
+        {/* ===== 龍舟控制台 ===== */}
         {tab === 'race' && (
           <div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
               <h2 style={{ fontSize: 20, fontWeight: 900 }}>🐉 龍舟控制台</h2>
-              <button onClick={resetRace} style={{ padding: '6px 14px', borderRadius: 8, border: '1px solid #374151', background: '#7f1d1d', color: '#fca5a5', fontSize: 11, cursor: 'pointer', fontWeight: 700 }}>🔄 全部重置</button>
+              <button onClick={resetRace} style={btnDanger}>🔄 全部重置</button>
             </div>
+
+            {/* 新增隊伍 */}
+            <div style={{ ...cardStyle, marginBottom: 16 }}>
+              <p style={{ fontWeight: 800, fontSize: 13, marginBottom: 8 }}>＋ 新增隊伍</p>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <input value={newTeam.name} onChange={e => setNewTeam(prev => ({ ...prev, name: e.target.value }))} style={{ ...inputStyle, flex: 2, minWidth: 120 }} placeholder="隊伍名稱" />
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <span style={{ fontSize: 10, color: '#9ca3af' }}>顏色</span>
+                  <input type="color" value={newTeam.color} onChange={e => setNewTeam(prev => ({ ...prev, color: e.target.value }))} style={{ width: 36, height: 36, border: 'none', borderRadius: 8, cursor: 'pointer', background: 'transparent' }} />
+                </div>
+                <input value={newTeam.flagImageUrl} onChange={e => setNewTeam(prev => ({ ...prev, flagImageUrl: e.target.value }))} style={{ ...inputStyle, flex: 2, minWidth: 120 }} placeholder="旗幟圖片網址（選填）" />
+                <button onClick={addTeam} style={{ ...btnPrimary, flexShrink: 0 }}>新增</button>
+              </div>
+            </div>
+
+            {/* 隊伍列表 */}
             {Object.entries(raceData).map(([teamId, team]) => {
               const total = (Number(team.outboundScore) || 0) + (team.turnSuccess ? (Number(team.inboundScore) || 0) : 0);
               return (
-                <div key={teamId} style={{ background: '#1f2937', borderRadius: 12, padding: 16, marginBottom: 8, border: '1px solid #374151' }}>
+                <div key={teamId} style={cardStyle}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <div style={{ width: 12, height: 12, borderRadius: '50%', background: team.color || '#666' }} />
+                      <div style={{ width: 14, height: 14, borderRadius: '50%', background: team.color || '#666' }} />
                       <span style={{ fontWeight: 800, fontSize: 14 }}>{team.name}</span>
+                      <span style={{ fontSize: 11, fontFamily: 'monospace', color: '#6b7280' }}>({total}/400)</span>
                     </div>
-                    <span style={{ fontSize: 12, fontFamily: 'monospace', color: '#6b7280' }}>
-                      去程:{team.outboundScore || 0} / 回程:{team.inboundScore || 0} / 折返:{team.turnSuccess ? '✅' : '❌'} / 💖{team.cheers || 0}
-                    </span>
+                    <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                      <span style={{ fontSize: 10, color: '#6b7280' }}>💖{team.cheers || 0}</span>
+                      <button onClick={() => deleteTeam(teamId, team.name)} style={{ ...btnGhost, color: '#f87171' }}>🗑</button>
+                    </div>
                   </div>
-                  {/* Progress bar */}
                   <div style={{ height: 8, background: '#374151', borderRadius: 4, marginBottom: 8, overflow: 'hidden' }}>
                     <div style={{ height: '100%', width: `${Math.min(100, (total / 400) * 100)}%`, background: `linear-gradient(90deg, ${team.color || '#3b82f6'}, ${team.color || '#3b82f6'}88)`, borderRadius: 4, transition: 'width 0.5s' }} />
                   </div>
-                  {/* Roll input */}
                   <div style={{ display: 'flex', gap: 8 }}>
-                    <input value={rollsInput[teamId] || ''} onChange={e => setRollsInput(prev => ({ ...prev, [teamId]: e.target.value }))}
-                      placeholder="輸入骰數，如 12,18,3,15,7" style={{ flex: 1, padding: '8px 12px', background: '#374151', border: '1px solid #4b5563', borderRadius: 8, color: '#e2e8f0', fontSize: 12, outline: 'none', fontFamily: 'monospace' }} />
-                    <button onClick={() => processTeamRolls(teamId)} style={{ padding: '8px 16px', borderRadius: 8, border: 'none', background: '#3b82f6', color: '#fff', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>結算</button>
+                    <input value={rollsInput[teamId] || ''} onChange={e => setRollsInput(prev => ({ ...prev, [teamId]: e.target.value }))} placeholder="輸入骰數，如 12,18,3,15,7" style={{ ...inputStyle, flex: 1, fontFamily: 'monospace' }} />
+                    <button onClick={() => processTeamRolls(teamId)} style={btnPrimary}>結算</button>
                   </div>
                 </div>
               );
             })}
-            {Object.keys(raceData).length === 0 && (
-              <p style={{ textAlign: 'center', color: '#6b7280', padding: 40 }}>尚無龍舟隊伍。請到 Firebase Console → Realtime Database → race 新增隊伍資料。</p>
-            )}
+            {Object.keys(raceData).length === 0 && <p style={{ textAlign: 'center', color: '#6b7280', padding: 40 }}>尚無隊伍，用上方表單新增第一支隊伍吧！</p>}
           </div>
         )}
 
-        {/* Settings */}
+        {/* ===== 設定 ===== */}
         {tab === 'settings' && (
           <div>
             <h2 style={{ fontSize: 20, fontWeight: 900, marginBottom: 16 }}>🔒 系統設定</h2>
-            <div style={{ background: '#1f2937', borderRadius: 12, padding: 20, border: '1px solid #374151' }}>
+            <div style={cardStyle}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
                 <div>
                   <p style={{ fontWeight: 800, fontSize: 14 }}>開放玩家註冊</p>
                   <p style={{ fontSize: 11, color: '#6b7280' }}>關閉後新玩家無法建立帳號</p>
                 </div>
-                <button onClick={() => setSettings(prev => ({ ...prev, registrationOpen: !prev.registrationOpen }))}
-                  style={{ width: 52, height: 28, borderRadius: 14, border: 'none', cursor: 'pointer', position: 'relative',
-                    background: settings.registrationOpen ? '#10b981' : '#374151', transition: 'background 0.3s' }}>
-                  <div style={{ width: 22, height: 22, borderRadius: '50%', background: '#fff', position: 'absolute', top: 3,
-                    left: settings.registrationOpen ? 27 : 3, transition: 'left 0.3s' }} />
+                <button onClick={() => setSettings(prev => ({ ...prev, registrationOpen: !prev.registrationOpen }))} style={{ width: 52, height: 28, borderRadius: 14, border: 'none', cursor: 'pointer', position: 'relative', background: settings.registrationOpen ? '#10b981' : '#374151', transition: 'background 0.3s' }}>
+                  <div style={{ width: 22, height: 22, borderRadius: '50%', background: '#fff', position: 'absolute', top: 3, left: settings.registrationOpen ? 27 : 3, transition: 'left 0.3s' }} />
                 </button>
               </div>
-              <div style={{ marginBottom: 16 }}>
-                <label style={{ fontSize: 11, fontWeight: 700, color: '#9ca3af', display: 'block', marginBottom: 4 }}>關閉時顯示的訊息</label>
-                <input value={settings.registrationClosedMsg || ''} onChange={e => setSettings(prev => ({ ...prev, registrationClosedMsg: e.target.value }))}
-                  style={{ width: '100%', boxSizing: 'border-box', padding: '10px 12px', background: '#374151', border: '1px solid #4b5563', borderRadius: 8, color: '#e2e8f0', fontSize: 13, outline: 'none' }} />
-              </div>
-              <button onClick={saveSettings} style={{ padding: '10px 24px', borderRadius: 8, border: 'none', background: '#3b82f6', color: '#fff', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>💾 儲存設定</button>
+              <label style={labelStyle}>關閉時顯示的訊息</label>
+              <input value={settings.registrationClosedMsg || ''} onChange={e => setSettings(prev => ({ ...prev, registrationClosedMsg: e.target.value }))} style={inputStyle} />
+              <button onClick={saveSettings} style={{ ...btnPrimary, marginTop: 16 }}>💾 儲存設定</button>
             </div>
           </div>
         )}
 
-        {/* Players */}
+        {/* ===== 玩家管理 ===== */}
         {tab === 'players' && (
           <div>
             <h2 style={{ fontSize: 20, fontWeight: 900, marginBottom: 16 }}>👥 玩家管理（共 {players.length} 人）</h2>
+
+            {/* 批次建立 */}
+            <div style={{ ...cardStyle, marginBottom: 16 }}>
+              <p style={{ fontWeight: 800, fontSize: 13, marginBottom: 8 }}>＋ 批次建立玩家</p>
+              <p style={{ fontSize: 10, color: '#6b7280', marginBottom: 8 }}>每行一個玩家名稱，系統會自動建立帳號。已存在的名稱會跳過。</p>
+              <textarea value={batchNames} onChange={e => setBatchNames(e.target.value)} style={{ ...inputStyle, minHeight: 80, resize: 'vertical' }} placeholder={'小明\n小華\n粽子大師\n...'} />
+              <div style={{ display: 'flex', gap: 8, marginTop: 8, alignItems: 'center' }}>
+                <div>
+                  <label style={{ fontSize: 10, color: '#9ca3af' }}>統一密碼</label>
+                  <input value={batchPin} onChange={e => setBatchPin(e.target.value)} style={{ ...inputStyle, width: 100 }} />
+                </div>
+                <div>
+                  <label style={{ fontSize: 10, color: '#9ca3af' }}>初始金幣</label>
+                  <input type="number" value={batchCoins} onChange={e => setBatchCoins(e.target.value)} style={{ ...inputStyle, width: 100 }} />
+                </div>
+                <button onClick={batchCreatePlayers} style={{ ...btnPrimary, marginTop: 14 }}>建立帳號</button>
+              </div>
+            </div>
+
+            {/* 玩家列表 */}
             <div style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                 <thead>
                   <tr style={{ borderBottom: '1px solid #374151' }}>
-                    {['暱稱', '金幣', '集章數', '商品數', '操作'].map(h => (
-                      <th key={h} style={{ textAlign: 'left', padding: '8px 12px', fontWeight: 800, color: '#9ca3af', fontSize: 10 }}>{h}</th>
-                    ))}
+                    {['暱稱', '金幣', '集章數', '商品數', '操作'].map(h => (<th key={h} style={{ textAlign: 'left', padding: '8px 12px', fontWeight: 800, color: '#9ca3af', fontSize: 10 }}>{h}</th>))}
                   </tr>
                 </thead>
                 <tbody>
@@ -1685,10 +1880,7 @@ function AdminPanel({ adminUser, onLogout, db, rtdb }) {
                       <td style={{ padding: '8px 12px' }}>{p.stamps?.length || 0}</td>
                       <td style={{ padding: '8px 12px' }}>{p.inventory?.length || 0}</td>
                       <td style={{ padding: '8px 12px' }}>
-                        <button onClick={() => {
-                          const val = prompt(`修改 ${p.username} 的金幣數（目前 ${p.coins}）：`, p.coins);
-                          if (val !== null && !isNaN(val)) updatePlayerCoins(p.username, val);
-                        }} style={{ padding: '4px 10px', borderRadius: 6, border: '1px solid #374151', background: 'transparent', color: '#60a5fa', fontSize: 10, cursor: 'pointer', fontWeight: 700 }}>改金幣</button>
+                        <button onClick={() => { const v = prompt(`修改 ${p.username} 的金幣（目前 ${p.coins}）：`, p.coins); if (v !== null && !isNaN(v)) updatePlayerCoins(p.username, v); }} style={btnGhost}>改金幣</button>
                       </td>
                     </tr>
                   ))}
