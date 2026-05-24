@@ -83,8 +83,9 @@ const DEFAULT_BOOTHS = [
   {
     id: 'booth-demo-1', side: 'top', name: '🍱 示範攤位（上排）', emoji: '🍱',
     stamp: { imageUrl: '' },
+    stampHint: '⬆ 這是沒上傳印章時的預設樣式（使用攤位 emoji）。攤主可上傳自製印章圖到噗浪，貼上圖床網址即可替換。',
     facadeImageUrl: '',
-    description: '這裡是攤位介紹文字，可以寫攤主介紹、攤位內容等。建議30字以內',
+    description: '這裡是攤位介紹文字，可以寫攤位的故事、特色、主題等。建議 2-3 句話讓玩家了解這個攤位在做什麼。',
     plurkUrl: 'https://www.plurk.com/p/你的攤位噗文網址，讓玩家直連過去完成集章任務',
     task: '這裡寫集章任務說明，例如：「到噗浪攤位留言【我要吃鹼粽】即可獲得印章與 50 元金幣」',
     items: [
@@ -96,6 +97,7 @@ const DEFAULT_BOOTHS = [
   {
     id: 'booth-demo-2', side: 'top', name: '🎮 小遊戲攤位', emoji: '🎮',
     stamp: { imageUrl: '' },
+    stampHint: '⬆ 建議製作 300×300 以上的正方形印章圖，上傳到噗浪後把圖床網址填到 stampImageUrl 欄位。',
     facadeImageUrl: '',
     description: '如果攤位有小遊戲，可以在這裡說明遊戲規則和玩法。也可以放遊戲的連結讓玩家直接進入遊玩。',
     plurkUrl: 'https://www.plurk.com/p/你的小遊戲噗文網址',
@@ -108,6 +110,7 @@ const DEFAULT_BOOTHS = [
   {
     id: 'booth-demo-3', side: 'bottom', name: '🎨 創作展示攤', emoji: '🎨',
     stamp: { imageUrl: '' },
+    stampHint: '⬆ 沒有自訂印章的攤位會用 emoji 當作印章圖案，也很可愛！',
     facadeImageUrl: '',
     description: '攤位也可以用來展示創作作品，封面圖（facadeImageUrl）請上傳到噗浪取得圖床網址，建議 300×300 以上正方形圖片。',
     plurkUrl: 'https://www.plurk.com/p/你的創作噗文',
@@ -747,11 +750,14 @@ export default function App() {
               {/* 印章區 */}
               <div style={{ marginTop: 28, padding: 24, background: '#fafaf9', borderRadius: 24, border: '1px solid rgba(0,0,0,0.04)', textAlign: 'center' }}>
                 <p style={{ fontSize: 10, fontWeight: 800, color: '#94a3b8', letterSpacing: 2, textTransform: 'uppercase', marginBottom: 16 }}>本攤印章</p>
-                <div style={{ display: 'inline-block', transition: 'all 0.6s cubic-bezier(0.16,1,0.3,1)', transform: userData.stamps.includes(selectedBooth.id) ? 'rotate(8deg) scale(1)' : 'rotate(0deg) scale(0.9)', opacity: userData.stamps.includes(selectedBooth.id) ? 1 : 0.35, filter: userData.stamps.includes(selectedBooth.id) ? 'none' : 'grayscale(1)', marginBottom: 16 }}>
-                  <StampDesign stamp={selectedBooth.stamp} size={100} stamped={true} boothEmoji={selectedBooth.emoji} />
-                </div>
+                <StampDesign stamp={selectedBooth.stamp} size={100} stamped={true} boothEmoji={selectedBooth.emoji} />
+                {selectedBooth.stampHint && (
+                  <p style={{ fontSize: 11, color: '#f59e0b', background: 'rgba(245,158,11,0.08)', border: '1px dashed rgba(245,158,11,0.3)', borderRadius: 12, padding: '10px 14px', marginTop: 12, lineHeight: 1.8, fontWeight: 600 }}>
+                    💡 {selectedBooth.stampHint}
+                  </p>
+                )}
                 <button disabled={userData.stamps.includes(selectedBooth.id)} onClick={() => collectStamp(selectedBooth.id)}
-                  style={{ width: '100%', padding: '16px 0', borderRadius: 18, fontSize: 15, fontWeight: 900, border: 'none', cursor: userData.stamps.includes(selectedBooth.id) ? 'default' : 'pointer', background: userData.stamps.includes(selectedBooth.id) ? '#e2e8f0' : 'linear-gradient(135deg, #fbbf24, #f59e0b)', color: userData.stamps.includes(selectedBooth.id) ? '#94a3b8' : '#451a03', boxShadow: userData.stamps.includes(selectedBooth.id) ? 'none' : '0 4px 20px rgba(245,158,11,0.3)', letterSpacing: 1 }}>
+                  style={{ width: '100%', marginTop: 16, padding: '16px 0', borderRadius: 18, fontSize: 15, fontWeight: 900, border: 'none', cursor: userData.stamps.includes(selectedBooth.id) ? 'default' : 'pointer', background: userData.stamps.includes(selectedBooth.id) ? '#e2e8f0' : 'linear-gradient(135deg, #fbbf24, #f59e0b)', color: userData.stamps.includes(selectedBooth.id) ? '#94a3b8' : '#451a03', boxShadow: userData.stamps.includes(selectedBooth.id) ? 'none' : '0 4px 20px rgba(245,158,11,0.3)', letterSpacing: 1 }}>
                   {userData.stamps.includes(selectedBooth.id) ? '✓ 已集章' : '🏆 領取印章與金幣'}
                 </button>
               </div>
