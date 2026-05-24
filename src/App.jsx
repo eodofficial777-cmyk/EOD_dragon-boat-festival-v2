@@ -80,7 +80,41 @@ const RANK_STYLES = [
 
 // 預設攤位 (如果 API 還沒回來的 fallback)
 const DEFAULT_BOOTHS = [
-  { id: 'booth-1', side: 'top', name: '載入中...', emoji: '⏳', stamp: { imageUrl: '' }, items: [], description: '', plurkUrl: '', task: '', facadeImageUrl: '' }
+  {
+    id: 'booth-demo-1', side: 'top', name: '🍱 示範攤位（上排）', emoji: '🍱',
+    stamp: { imageUrl: '' },
+    facadeImageUrl: '',
+    description: '這裡是攤位介紹文字，可以寫攤主介紹、攤位內容等。建議30字以內',
+    plurkUrl: 'https://www.plurk.com/p/你的攤位噗文網址，讓玩家直連過去完成集章任務',
+    task: '這裡寫集章任務說明，例如：「到噗浪攤位留言【我要吃鹼粽】即可獲得印章與 50 元金幣」',
+    items: [
+      { id: 'demo-item-1', name: '示範商品 A', price: 50, description: '這裡寫商品說明，建議20字內', imageUrl: '' },
+      { id: 'demo-item-2', name: '示範商品 B', price: 30, description: '商品圖片請上傳噗浪取得圖片網址', imageUrl: '' },
+    ],
+    stats: { stampCount: 12, salesCount: 8, salesRevenue: 360 },
+  },
+  {
+    id: 'booth-demo-2', side: 'top', name: '🎮 小遊戲攤位', emoji: '🎮',
+    stamp: { imageUrl: '' },
+    facadeImageUrl: '',
+    description: '如果攤位有小遊戲，可以在這裡說明遊戲規則和玩法。也可以放遊戲的連結讓玩家直接進入遊玩。',
+    plurkUrl: 'https://www.plurk.com/p/你的小遊戲噗文網址',
+    task: '完成像是猜拳小遊戲之類的任務，即可獲得集章！',
+    items: [
+      { id: 'demo-item-3', name: '遊戲獎品', price: 100, description: '通關獎勵，限量兌換', imageUrl: '' },
+    ],
+    stats: { stampCount: 5, salesCount: 2, salesRevenue: 200 },
+  },
+  {
+    id: 'booth-demo-3', side: 'bottom', name: '🎨 創作展示攤', emoji: '🎨',
+    stamp: { imageUrl: '' },
+    facadeImageUrl: '',
+    description: '攤位也可以用來展示創作作品，封面圖（facadeImageUrl）請上傳到噗浪取得圖床網址，建議 300×300 以上正方形圖片。',
+    plurkUrl: 'https://www.plurk.com/p/你的創作噗文',
+    task: '欣賞完作品後，在噗浪按讚或其他方案即可集章 ✨',
+    items: [],
+    stats: { stampCount: 3, salesCount: 0, salesRevenue: 0 },
+  },
 ];
 
 // 模擬龍舟賽資料
@@ -313,8 +347,8 @@ export default function App() {
     const name = `旅人_${Math.floor(Math.random() * 10000)}`;
     setUserData({
       username: name, pin: '0000', coins: 888,
-      inventory: [{ id: 'demo-1', name: '試吃肉粽', price: 0, boothName: booths[0]?.name || '試玩攤位', description: '免費試吃品', imageUrl: '', date: new Date().toLocaleDateString(), stackRotation: 3 }],
-      stamps: booths.length > 0 ? [booths[0].id] : [], createdAt: new Date().toISOString(), isDemo: true
+      inventory: [{ id: 'demo-1', name: '歡迎禮包', price: 0, boothName: '系統贈送', description: '試玩模式贈品，正式活動會有攤位的真實商品', imageUrl: '', date: new Date().toLocaleDateString(), stackRotation: 3 }],
+      stamps: ['booth-demo-1'], createdAt: new Date().toISOString(), isDemo: true
     });
     setView('home');
     showMsg(`試玩模式啟動！（資料不會存入雲端）`, 'success');
