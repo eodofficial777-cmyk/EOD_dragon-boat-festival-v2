@@ -556,13 +556,17 @@ export default function App() {
           </button>
 
           {/* 管理員入口 */}
-          <button onClick={() => {
-            signInWithPopup(auth, googleProvider).then((result) => {
-              if (result.user) { setAdminUser(result.user); setView('admin'); }
-            }).catch((err) => {
-              console.error('Admin login error:', err);
-              alert('登入錯誤: ' + err.code + ' - ' + err.message);
-            });
+          <button onClick={async () => {
+            try {
+              const result = await signInWithPopup(auth, googleProvider);
+              if (result.user) setView('admin');
+            } catch (err) {
+              if (err.code === 'auth/popup-blocked') {
+                signInWithRedirect(auth, googleProvider);
+              } else {
+                showMsg('登入失敗：' + err.message, 'warn');
+              }
+            }
           }}
 
       <style>{`
