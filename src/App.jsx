@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { db, rtdb, auth, googleProvider } from './firebase';
 import { collection, doc, getDoc, getDocs, setDoc, updateDoc, addDoc, query, orderBy, where, onSnapshot, arrayUnion, increment as fsIncrement, Timestamp } from 'firebase/firestore';
 import { ref, onValue, runTransaction } from 'firebase/database';
-import { signInWithRedirect, signOut, onAuthStateChanged, getRedirectResult } from 'firebase/auth';
+import { signInWithPopup, signOut, onAuthStateChanged } from 'firebase/auth';
 
 // ★ 管理員 UID（第一次登入後到 Firebase Console → Authentication 找你的 UID 填進來）
 const ADMIN_UID = 'aYe1g9g27SViRei2gjAxTQmt5s13';
@@ -86,11 +86,11 @@ const DEFAULT_BOOTHS = [
     stampHint: '⬆ 這是沒上傳印章時的預設樣式（使用攤位 emoji）。攤主可上傳自製印章圖到噗浪，貼上圖床網址即可替換。',
     facadeImageUrl: '',
     description: '這裡是攤位介紹文字，可以寫攤位的故事、特色、主題等。建議 2-3 句話讓玩家了解這個攤位在做什麼。',
-    plurkUrl: 'https://www.plurk.com/p/你的攤位噗文網址，讓玩家直連過去完成集章任務',
-    task: '這裡寫集章任務說明，例如：「到噗浪攤位留言【我要吃鹼粽】即可獲得印章與 50 元金幣」',
+    plurkUrl: 'https://www.plurk.com/p/你的噗文網址',
+    task: '這裡寫集章任務說明，例如：「到噗浪攤位留言【粽志成城】即可獲得印章與 50 元金幣」',
     items: [
-      { id: 'demo-item-1', name: '示範商品 A', price: 50, description: '這裡寫商品說明，建議20字內', imageUrl: '' },
-      { id: 'demo-item-2', name: '示範商品 B', price: 30, description: '商品圖片請上傳噗浪取得圖片網址', imageUrl: '' },
+      { id: 'demo-item-1', name: '示範商品 A', price: 50, description: '這裡寫商品說明，例如口味、內容物等', imageUrl: '' },
+      { id: 'demo-item-2', name: '示範商品 B', price: 30, description: '商品圖片請上傳噗浪取得圖床網址', imageUrl: '' },
     ],
     stats: { stampCount: 12, salesCount: 8, salesRevenue: 360 },
   },
@@ -100,8 +100,8 @@ const DEFAULT_BOOTHS = [
     stampHint: '⬆ 建議製作 300×300 以上的正方形印章圖，上傳到噗浪後把圖床網址填到 stampImageUrl 欄位。',
     facadeImageUrl: '',
     description: '如果攤位有小遊戲，可以在這裡說明遊戲規則和玩法。也可以放遊戲的連結讓玩家直接進入遊玩。',
-    plurkUrl: 'https://www.plurk.com/p/你的小遊戲噗文網址',
-    task: '完成像是猜拳小遊戲之類的任務，即可獲得集章！',
+    plurkUrl: 'https://www.plurk.com/p/你的小遊戲噗文',
+    task: '完成小遊戲並在噗浪截圖回報，即可獲得集章！',
     items: [
       { id: 'demo-item-3', name: '遊戲獎品', price: 100, description: '通關獎勵，限量兌換', imageUrl: '' },
     ],
@@ -114,7 +114,7 @@ const DEFAULT_BOOTHS = [
     facadeImageUrl: '',
     description: '攤位也可以用來展示創作作品，封面圖（facadeImageUrl）請上傳到噗浪取得圖床網址，建議 300×300 以上正方形圖片。',
     plurkUrl: 'https://www.plurk.com/p/你的創作噗文',
-    task: '欣賞完作品後，在噗浪按讚或其他方案即可集章 ✨',
+    task: '欣賞完作品後，在噗浪留下你的感想即可集章 ✨',
     items: [],
     stats: { stampCount: 3, salesCount: 0, salesRevenue: 0 },
   },
@@ -157,12 +157,6 @@ export default function App() {
   // 監聽管理員登入狀態
   // ============================================================
   useEffect(() => {
-    getRedirectResult(auth).then((result) => {
-      if (result?.user?.uid === ADMIN_UID) {
-        setAdminUser(result.user);
-        setView('admin');
-      }
-    }).catch(() => {});
     const unsub = onAuthStateChanged(auth, (user) => {
       if (user && user.uid === ADMIN_UID) {
         setAdminUser(user);
@@ -481,9 +475,20 @@ export default function App() {
     }
   };
 
-  // ============================================================
-  // 管理員後台
-  // ============================================================
+  // --- 管理員浮動按鈕（在玩家畫面時顯示）---
+  const adminFloatingBtn = (adminUser && view !== 'admin') ? (
+    <button onClick={() => setView('admin')} style={{
+      position: 'fixed', bottom: 100, right: 16, zIndex: 999,
+      padding: '10px 16px', borderRadius: 16,
+      background: 'linear-gradient(135deg, #1e40af, #3b82f6)',
+      color: '#fff', fontSize: 11, fontWeight: 800,
+      border: 'none', cursor: 'pointer',
+      boxShadow: '0 4px 20px rgba(59,130,246,0.4)',
+      display: 'flex', alignItems: 'center', gap: 6
+    }}>🔐 回管理後台</button>
+  ) : null;
+
+  // --- 管理員後台（必須在入口畫面之前檢查）---
   if (view === 'admin' && adminUser) return (
     <AdminPanel
       adminUser={adminUser}
@@ -501,18 +506,6 @@ export default function App() {
     />
   );
 
-  const adminFloatingBtn = (adminUser && view !== 'admin') ? (
-    <button onClick={() => setView('admin')} style={{
-      position: 'fixed', bottom: 100, right: 16, zIndex: 999,
-      padding: '10px 16px', borderRadius: 16,
-      background: 'linear-gradient(135deg, #1e40af, #3b82f6)',
-      color: '#fff', fontSize: 11, fontWeight: 800,
-      border: 'none', cursor: 'pointer',
-      boxShadow: '0 4px 20px rgba(59,130,246,0.4)',
-      display: 'flex', alignItems: 'center', gap: 6
-    }}>🔐 回管理後台</button>
-  ) : null;
-  
   // --- 入口畫面 ---
   if (view === 'entry' || !userData) return (
     <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, overflow: 'hidden', position: 'relative', background: 'linear-gradient(160deg, #0f2922 0%, #134e3a 40%, #1a3a4a 100%)' }}>
@@ -556,18 +549,19 @@ export default function App() {
           </button>
 
           {/* 管理員入口 */}
-          <button onClick={async () => {
-            try {
-              const result = await signInWithPopup(auth, googleProvider);
-              if (result.user) setView('admin');
-            } catch (err) {
-              if (err.code === 'auth/popup-blocked') {
-                signInWithRedirect(auth, googleProvider);
-              } else {
-                showMsg('登入失敗：' + err.message, 'warn');
-              }
-            }
-          }}
+          <button onClick={() => {
+            signInWithPopup(auth, googleProvider).then((result) => {
+              if (result.user) { setAdminUser(result.user); setView('admin'); }
+            }).catch((err) => {
+              console.error('Admin login error:', err);
+              alert('登入錯誤: ' + err.code + ' - ' + err.message);
+            });
+          }} style={{ width: '100%', marginTop: 8, padding: '10px 0', background: 'transparent', color: 'rgba(167,215,195,0.3)', fontSize: 10, fontWeight: 700, border: '1px solid rgba(255,255,255,0.05)', borderRadius: 12, cursor: 'pointer', letterSpacing: 1 }}>
+            🔐 管理員入口
+          </button>
+        </div>
+        {userData?.isDemo && <p style={{ textAlign: 'center', color: 'rgba(255,255,255,0.3)', fontSize: 10, marginTop: 12 }}>試玩模式的資料不會儲存到雲端</p>}
+      </div>
 
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@400;700;900&family=Noto+Sans+TC:wght@400;500;700;900&display=swap');
@@ -583,7 +577,7 @@ export default function App() {
   // ============================================================
   return (
     <div style={{ minHeight: '100vh', background: '#f8f7f4', fontFamily: '"Noto Sans TC",-apple-system,sans-serif', paddingBottom: 88, overflow: 'hidden' }}>
-    {adminFloatingBtn}
+      {adminFloatingBtn}
       {/* Header */}
       <header style={{ position: 'sticky', top: 0, zIndex: 40, background: 'rgba(255,255,255,0.92)', backdropFilter: 'blur(20px)', borderBottom: '1px solid rgba(0,0,0,0.06)', padding: '12px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -754,14 +748,16 @@ export default function App() {
               {/* 印章區 */}
               <div style={{ marginTop: 28, padding: 24, background: '#fafaf9', borderRadius: 24, border: '1px solid rgba(0,0,0,0.04)', textAlign: 'center' }}>
                 <p style={{ fontSize: 10, fontWeight: 800, color: '#94a3b8', letterSpacing: 2, textTransform: 'uppercase', marginBottom: 16 }}>本攤印章</p>
-                <StampDesign stamp={selectedBooth.stamp} size={100} stamped={true} boothEmoji={selectedBooth.emoji} />
+                <div style={{ display: 'inline-block', transition: 'all 0.6s cubic-bezier(0.16,1,0.3,1)', transform: userData.stamps.includes(selectedBooth.id) ? 'rotate(8deg) scale(1)' : 'rotate(0deg) scale(0.9)', opacity: userData.stamps.includes(selectedBooth.id) ? 1 : 0.35, filter: userData.stamps.includes(selectedBooth.id) ? 'none' : 'grayscale(1)', marginBottom: 16 }}>
+                  <StampDesign stamp={selectedBooth.stamp} size={100} stamped={true} boothEmoji={selectedBooth.emoji} />
+                </div>
                 {selectedBooth.stampHint && (
-                  <p style={{ fontSize: 11, color: '#f59e0b', background: 'rgba(245,158,11,0.08)', border: '1px dashed rgba(245,158,11,0.3)', borderRadius: 12, padding: '10px 14px', marginTop: 12, lineHeight: 1.8, fontWeight: 600 }}>
+                  <p style={{ fontSize: 11, color: '#f59e0b', background: 'rgba(245,158,11,0.08)', border: '1px dashed rgba(245,158,11,0.3)', borderRadius: 12, padding: '10px 14px', marginBottom: 16, lineHeight: 1.8, fontWeight: 600, textAlign: 'left' }}>
                     💡 {selectedBooth.stampHint}
                   </p>
                 )}
                 <button disabled={userData.stamps.includes(selectedBooth.id)} onClick={() => collectStamp(selectedBooth.id)}
-                  style={{ width: '100%', marginTop: 16, padding: '16px 0', borderRadius: 18, fontSize: 15, fontWeight: 900, border: 'none', cursor: userData.stamps.includes(selectedBooth.id) ? 'default' : 'pointer', background: userData.stamps.includes(selectedBooth.id) ? '#e2e8f0' : 'linear-gradient(135deg, #fbbf24, #f59e0b)', color: userData.stamps.includes(selectedBooth.id) ? '#94a3b8' : '#451a03', boxShadow: userData.stamps.includes(selectedBooth.id) ? 'none' : '0 4px 20px rgba(245,158,11,0.3)', letterSpacing: 1 }}>
+                  style={{ width: '100%', padding: '16px 0', borderRadius: 18, fontSize: 15, fontWeight: 900, border: 'none', cursor: userData.stamps.includes(selectedBooth.id) ? 'default' : 'pointer', background: userData.stamps.includes(selectedBooth.id) ? '#e2e8f0' : 'linear-gradient(135deg, #fbbf24, #f59e0b)', color: userData.stamps.includes(selectedBooth.id) ? '#94a3b8' : '#451a03', boxShadow: userData.stamps.includes(selectedBooth.id) ? 'none' : '0 4px 20px rgba(245,158,11,0.3)', letterSpacing: 1 }}>
                   {userData.stamps.includes(selectedBooth.id) ? '✓ 已集章' : '🏆 領取印章與金幣'}
                 </button>
               </div>
