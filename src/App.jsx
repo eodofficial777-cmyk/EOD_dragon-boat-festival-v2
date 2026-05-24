@@ -557,13 +557,13 @@ export default function App() {
 
           {/* 管理員入口 */}
           <button onClick={() => {
-            signInWithRedirect(auth, googleProvider);
-          }} style={{ width: '100%', marginTop: 8, padding: '10px 0', background: 'transparent', color: 'rgba(167,215,195,0.3)', fontSize: 10, fontWeight: 700, border: '1px solid rgba(255,255,255,0.05)', borderRadius: 12, cursor: 'pointer', letterSpacing: 1 }}>
-            🔐 管理員入口
-          </button>
-        </div>
-        {userData?.isDemo && <p style={{ textAlign: 'center', color: 'rgba(255,255,255,0.3)', fontSize: 10, marginTop: 12 }}>試玩模式的資料不會儲存到雲端</p>}
-      </div>
+            signInWithPopup(auth, googleProvider).then((result) => {
+              if (result.user) { setAdminUser(result.user); setView('admin'); }
+            }).catch((err) => {
+              console.error('Admin login error:', err);
+              alert('登入錯誤: ' + err.code + ' - ' + err.message);
+            });
+          }}
 
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@400;700;900&family=Noto+Sans+TC:wght@400;500;700;900&display=swap');
