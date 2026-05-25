@@ -83,25 +83,25 @@ const DEFAULT_BOOTHS = [
   {
     id: 'booth-demo-1', side: 'top', name: '🍱 示範攤位（上排）', emoji: '🍱',
     stamp: { imageUrl: '' },
-    stampHint: '⬆ 這是沒上傳印章時的預設樣式（使用emoji）。攤主可上傳自製印章圖到噗浪，提供圖床網址，並填到申請表單中。',
+    stampHint: '⬆ 這是沒上傳印章時的預設樣式（使用攤位 emoji）。攤主可上傳自製印章圖到噗浪，貼上圖床網址即可替換。',
     facadeImageUrl: '',
-    description: '這裡是攤位介紹文字。建議 2-3 句話讓玩家了解這個攤位在做什麼。',
+    description: '這裡是攤位介紹文字，可以寫攤位的故事、特色、主題等。建議 2-3 句話讓玩家了解這個攤位在做什麼。',
     plurkUrl: 'https://www.plurk.com/p/你的噗文網址',
-    task: '這裡寫集章任務說明，例如：「到噗浪攤位留言【今年粽太多】即可獲得印章與 50 元金幣」',
+    task: '這裡寫集章任務說明，例如：「到噗浪攤位留言【粽志成城】即可獲得印章與 50 元金幣」',
     items: [
       { id: 'demo-item-1', name: '示範商品 A', price: 50, description: '這裡寫商品說明，例如口味、內容物等', imageUrl: '' },
-      { id: 'demo-item-2', name: '示範商品 B', price: 30, description: '商品圖片請上傳噗浪取得圖床網址，並填到申請表單中', imageUrl: '' },
+      { id: 'demo-item-2', name: '示範商品 B', price: 30, description: '商品圖片請上傳噗浪取得圖床網址', imageUrl: '' },
     ],
     stats: { stampCount: 12, salesCount: 8, salesRevenue: 360 },
   },
   {
     id: 'booth-demo-2', side: 'top', name: '🎮 小遊戲攤位', emoji: '🎮',
     stamp: { imageUrl: '' },
-    stampHint: '⬆ 建議製作 300×300 以上的印章圖，上傳到噗浪後把圖床網址，並填到申請表單中。',
+    stampHint: '⬆ 建議製作 300×300 以上的正方形印章圖，上傳到噗浪後把圖床網址填到 stampImageUrl 欄位。',
     facadeImageUrl: '',
-    description: '如果攤位有小遊戲，可以在這裡說明遊戲規則和玩法。',
+    description: '如果攤位有小遊戲，可以在這裡說明遊戲規則和玩法。也可以放遊戲的連結讓玩家直接進入遊玩。',
     plurkUrl: 'https://www.plurk.com/p/你的小遊戲噗文',
-    task: '完成小遊戲(例如猜拳這類型的)，即可獲得集章與金幣！',
+    task: '完成小遊戲並在噗浪截圖回報，即可獲得集章！',
     items: [
       { id: 'demo-item-3', name: '遊戲獎品', price: 100, description: '通關獎勵，限量兌換', imageUrl: '' },
     ],
@@ -112,9 +112,9 @@ const DEFAULT_BOOTHS = [
     stamp: { imageUrl: '' },
     stampHint: '⬆ 沒有自訂印章的攤位會用 emoji 當作印章圖案，也很可愛！',
     facadeImageUrl: '',
-    description: '攤位也可以用來展示創作作品，封面圖請上傳到噗浪取得圖床網址，並填到申請表單中，建議 300×300 以上圖片。',
+    description: '攤位也可以用來展示創作作品，封面圖（facadeImageUrl）請上傳到噗浪取得圖床網址，建議 300×300 以上正方形圖片。',
     plurkUrl: 'https://www.plurk.com/p/你的創作噗文',
-    task: '欣賞完作品後，可以設計在噗浪按讚或表情，即可集章與獲得金幣',
+    task: '欣賞完作品後，在噗浪留下你的感想即可集章 ✨',
     items: [],
     stats: { stampCount: 3, salesCount: 0, salesRevenue: 0 },
   },
@@ -122,10 +122,10 @@ const DEFAULT_BOOTHS = [
 
 // 模擬龍舟賽資料
 const MOCK_RACE_TEAMS = [
-  { id: 1, name: '協會這一隊', color: '#dc2626', flagImageUrl: '', outboundScore: 120, inboundScore: 0, turnSuccess: false, cheers: 88, lastRolls: [15, 20, 18, 5, 2] },
-  { id: 2, name: '夜鷺絕隊贏', color: '#2563eb', flagImageUrl: 'https://images.plurk.com/2HjjzKJMBWLsFSHYdLaNAv.png', outboundScore: 200, inboundScore: 0, turnSuccess: false, cheers: 156, lastRolls: [20, 20, 20, 20, 20] },
-  { id: 3, name: '流浪者不輸陣', color: '#16a34a', flagImageUrl: '', outboundScore: 200, inboundScore: 60, turnSuccess: true, cheers: 342, lastRolls: [1, 3, 2, 5, 4] },
-  { id: 4, name: '彎不過就填海隊', color: '#9333ea', flagImageUrl: 'https://images.plurk.com/2HjjzKJMBWLsFSHYdLaNAv.png', outboundScore: 200, inboundScore: 200, turnSuccess: true, cheers: 999, lastRolls: [] },
+  { id: 1, name: '南港輪胎隊', color: '#dc2626', flagImageUrl: '', outboundScore: 120, inboundScore: 0, turnSuccess: false, cheers: 88, lastRolls: [15, 20, 18, 5, 2] },
+  { id: 2, name: '屈原不想下水隊', color: '#2563eb', flagImageUrl: 'https://images.plurk.com/2HjjzKJMBWLsFSHYdLaNAv.png', outboundScore: 200, inboundScore: 0, turnSuccess: false, cheers: 156, lastRolls: [20, 20, 20, 20, 20] },
+  { id: 3, name: '粽子吃到飽隊', color: '#16a34a', flagImageUrl: '', outboundScore: 200, inboundScore: 60, turnSuccess: true, cheers: 342, lastRolls: [1, 3, 2, 5, 4] },
+  { id: 4, name: '極速龍舟傳說', color: '#9333ea', flagImageUrl: 'https://images.plurk.com/2HjjzKJMBWLsFSHYdLaNAv.png', outboundScore: 200, inboundScore: 200, turnSuccess: true, cheers: 999, lastRolls: [] },
 ];
 
 // ============================================================
@@ -551,8 +551,7 @@ export default function App() {
           {/* 管理員入口 */}
           <button onClick={() => {
             signInWithPopup(auth, googleProvider).then((result) => {
-              if (result.user && result.user.uid === ADMIN_UID) { setAdminUser(result.user); setView('admin'); }
-              else { signOut(auth); showMsg('此帳號沒有管理員權限', 'warn'); }
+              if (result.user) { setAdminUser(result.user); setView('admin'); }
             }).catch((err) => {
               console.error('Admin login error:', err);
               alert('登入錯誤: ' + err.code + ' - ' + err.message);
@@ -1896,32 +1895,6 @@ function AdminPanel({ adminUser, onLogout, db, rtdb }) {
                       <td style={{ padding: '8px 12px', display: 'flex', gap: 4 }}>
                         <button onClick={() => { const v = prompt(`修改 ${p.username} 的金幣（目前 ${p.coins}）：`, p.coins); if (v !== null && !isNaN(v)) updatePlayerCoins(p.username, v); }} style={btnGhost}>改金幣</button>
                         <button onClick={async () => { const v = prompt(`修改 ${p.username} 的密碼（目前 ${p.pin}）：`, p.pin); if (v && v.length >= 4) { await updateDoc(doc(db, 'players', p.username), { pin: v }); await loadAll(); showAdminMsg(`已更新 ${p.username} 的密碼`); } else if (v) { showAdminMsg('密碼至少 4 位'); } }} style={btnGhost}>改密碼</button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-
-            {/* 玩家列表 */}
-            <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-                <thead>
-                  <tr style={{ borderBottom: '1px solid #374151' }}>
-                    {['暱稱', '金幣', '集章數', '商品數', '操作'].map(h => (<th key={h} style={{ textAlign: 'left', padding: '8px 12px', fontWeight: 800, color: '#9ca3af', fontSize: 10 }}>{h}</th>))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {players.sort((a, b) => (b.stamps?.length || 0) - (a.stamps?.length || 0)).map(p => (
-                    <tr key={p.username} style={{ borderBottom: '1px solid #1f2937' }}>
-                      <td style={{ padding: '8px 12px', fontWeight: 700 }}>{p.username}</td>
-                      <td style={{ padding: '8px 12px', fontFamily: 'monospace', color: '#fbbf24' }}>{p.coins}</td>
-                      <td style={{ padding: '8px 12px' }}>{p.stamps?.length || 0}</td>
-                      <td style={{ padding: '8px 12px' }}>{p.inventory?.length || 0}</td>
-                      <td style={{ padding: '8px 12px' }}>
-                        <button onClick={() => { const v = prompt(`修改 ${p.username} 的金幣（目前 ${p.coins}）：`, p.coins); if (v !== null && !isNaN(v)) updatePlayerCoins(p.username, v); }} style={btnGhost}>改金幣</button>
                       </td>
                     </tr>
                   ))}
