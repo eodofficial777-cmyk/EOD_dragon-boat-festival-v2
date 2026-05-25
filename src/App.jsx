@@ -551,7 +551,8 @@ export default function App() {
           {/* 管理員入口 */}
           <button onClick={() => {
             signInWithPopup(auth, googleProvider).then((result) => {
-              if (result.user) { setAdminUser(result.user); setView('admin'); }
+              if (result.user && result.user.uid === ADMIN_UID) { setAdminUser(result.user); setView('admin'); }
+              else if (result.user) { signOut(auth); showMsg('此帳號沒有管理員權限', 'warn'); }
             }).catch((err) => {
               console.error('Admin login error:', err);
               alert('登入錯誤: ' + err.code + ' - ' + err.message);
