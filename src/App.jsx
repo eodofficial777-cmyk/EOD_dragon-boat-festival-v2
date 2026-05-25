@@ -122,10 +122,10 @@ const DEFAULT_BOOTHS = [
 
 // 模擬龍舟賽資料
 const MOCK_RACE_TEAMS = [
-  { id: 1, name: '南港輪胎隊', color: '#dc2626', flagImageUrl: '', outboundScore: 120, inboundScore: 0, turnSuccess: false, cheers: 88, lastRolls: [15, 20, 18, 5, 2] },
-  { id: 2, name: '屈原不想下水隊', color: '#2563eb', flagImageUrl: 'https://images.plurk.com/2HjjzKJMBWLsFSHYdLaNAv.png', outboundScore: 200, inboundScore: 0, turnSuccess: false, cheers: 156, lastRolls: [20, 20, 20, 20, 20] },
-  { id: 3, name: '粽子吃到飽隊', color: '#16a34a', flagImageUrl: '', outboundScore: 200, inboundScore: 60, turnSuccess: true, cheers: 342, lastRolls: [1, 3, 2, 5, 4] },
-  { id: 4, name: '極速龍舟傳說', color: '#9333ea', flagImageUrl: 'https://images.plurk.com/2HjjzKJMBWLsFSHYdLaNAv.png', outboundScore: 200, inboundScore: 200, turnSuccess: true, cheers: 999, lastRolls: [] },
+  { id: 1, name: '協會這一隊', color: '#dc2626', flagImageUrl: '', outboundScore: 120, inboundScore: 0, turnSuccess: false, cheers: 88, lastRolls: [15, 20, 18, 5, 2] },
+  { id: 2, name: '夜鷺絕隊贏', color: '#2563eb', flagImageUrl: 'https://images.plurk.com/2HjjzKJMBWLsFSHYdLaNAv.png', outboundScore: 200, inboundScore: 0, turnSuccess: false, cheers: 156, lastRolls: [20, 20, 20, 20, 20] },
+  { id: 3, name: '流浪者不輸陣', color: '#16a34a', flagImageUrl: '', outboundScore: 200, inboundScore: 60, turnSuccess: true, cheers: 342, lastRolls: [1, 3, 2, 5, 4] },
+  { id: 4, name: '彎不過就填海隊', color: '#9333ea', flagImageUrl: 'https://images.plurk.com/2HjjzKJMBWLsFSHYdLaNAv.png', outboundScore: 200, inboundScore: 200, turnSuccess: true, cheers: 999, lastRolls: [] },
 ];
 
 // ============================================================
