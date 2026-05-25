@@ -551,7 +551,8 @@ export default function App() {
           {/* 管理員入口 */}
           <button onClick={() => {
             signInWithPopup(auth, googleProvider).then((result) => {
-              if (result.user) { setAdminUser(result.user); setView('admin'); }
+              if (result.user && result.user.uid === ADMIN_UID) { setAdminUser(result.user); setView('admin'); }
+              else { signOut(auth); showMsg('此帳號沒有管理員權限', 'warn'); }
             }).catch((err) => {
               console.error('Admin login error:', err);
               alert('登入錯誤: ' + err.code + ' - ' + err.message);
@@ -1846,23 +1847,63 @@ function AdminPanel({ adminUser, onLogout, db, rtdb }) {
           <div>
             <h2 style={{ fontSize: 20, fontWeight: 900, marginBottom: 16 }}>👥 玩家管理（共 {players.length} 人）</h2>
 
-            {/* 批次建立 */}
+            {/* 新增單一玩家 */}
             <div style={{ ...cardStyle, marginBottom: 16 }}>
-              <p style={{ fontWeight: 800, fontSize: 13, marginBottom: 8 }}>＋ 批次建立玩家</p>
-              <p style={{ fontSize: 10, color: '#6b7280', marginBottom: 8 }}>每行一個玩家名稱，系統會自動建立帳號。已存在的名稱會跳過。</p>
-              <textarea value={batchNames} onChange={e => setBatchNames(e.target.value)} style={{ ...inputStyle, minHeight: 80, resize: 'vertical' }} placeholder={'小明\n小華\n粽子大師\n...'} />
-              <div style={{ display: 'flex', gap: 8, marginTop: 8, alignItems: 'center' }}>
+              <p style={{ fontWeight: 800, fontSize: 13, marginBottom: 8 }}>＋ 新增玩家</p>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap' }}>
                 <div>
-                  <label style={{ fontSize: 10, color: '#9ca3af' }}>統一密碼</label>
-                  <input value={batchPin} onChange={e => setBatchPin(e.target.value)} style={{ ...inputStyle, width: 100 }} />
+                  <label style={{ fontSize: 10, color: '#9ca3af', display: 'block', marginBottom: 4 }}>暱稱</label>
+                  <input value={batchNames} onChange={e => setBatchNames(e.target.value)} style={{ ...inputStyle, width: 160 }} placeholder="玩家暱稱" />
                 </div>
                 <div>
-                  <label style={{ fontSize: 10, color: '#9ca3af' }}>初始金幣</label>
+                  <label style={{ fontSize: 10, color: '#9ca3af', display: 'block', marginBottom: 4 }}>密碼</label>
+                  <input value={batchPin} onChange={e => setBatchPin(e.target.value)} style={{ ...inputStyle, width: 120 }} placeholder="4位以上" />
+                </div>
+                <div>
+                  <label style={{ fontSize: 10, color: '#9ca3af', display: 'block', marginBottom: 4 }}>初始金幣</label>
                   <input type="number" value={batchCoins} onChange={e => setBatchCoins(e.target.value)} style={{ ...inputStyle, width: 100 }} />
                 </div>
-                <button onClick={batchCreatePlayers} style={{ ...btnPrimary, marginTop: 14 }}>建立帳號</button>
+                <button onClick={async () => {
+                  const name = batchNames.trim();
+                  if (!name) return showAdminMsg('請輸入玩家暱稱');
+                  if (batchPin.length < 4) return showAdminMsg('密碼至少 4 位');
+                  const existing = await getDoc(doc(db, 'players', name));
+                  if (existing.exists()) return showAdminMsg(`「${name}」已存在`);
+                  await setDoc(doc(db, 'players', name), { pin: batchPin, coins: Number(batchCoins) || 500, inventory: [], stamps: [], createdAt: Timestamp.now() });
+                  setBatchNames('');
+                  await loadAll();
+                  showAdminMsg(`✅ 已建立玩家「${name}」`);
+                }} style={btnPrimary}>建立</button>
               </div>
             </div>
+
+            {/* 玩家列表 */}
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                <thead>
+                  <tr style={{ borderBottom: '1px solid #374151' }}>
+                    {['暱稱', '密碼', '金幣', '集章數', '商品數', '操作'].map(h => (<th key={h} style={{ textAlign: 'left', padding: '8px 12px', fontWeight: 800, color: '#9ca3af', fontSize: 10 }}>{h}</th>))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {players.sort((a, b) => (b.stamps?.length || 0) - (a.stamps?.length || 0)).map(p => (
+                    <tr key={p.username} style={{ borderBottom: '1px solid #1f2937' }}>
+                      <td style={{ padding: '8px 12px', fontWeight: 700 }}>{p.username}</td>
+                      <td style={{ padding: '8px 12px', fontFamily: 'monospace', color: '#94a3b8', letterSpacing: 2 }}>{p.pin}</td>
+                      <td style={{ padding: '8px 12px', fontFamily: 'monospace', color: '#fbbf24' }}>{p.coins}</td>
+                      <td style={{ padding: '8px 12px' }}>{p.stamps?.length || 0}</td>
+                      <td style={{ padding: '8px 12px' }}>{p.inventory?.length || 0}</td>
+                      <td style={{ padding: '8px 12px', display: 'flex', gap: 4 }}>
+                        <button onClick={() => { const v = prompt(`修改 ${p.username} 的金幣（目前 ${p.coins}）：`, p.coins); if (v !== null && !isNaN(v)) updatePlayerCoins(p.username, v); }} style={btnGhost}>改金幣</button>
+                        <button onClick={async () => { const v = prompt(`修改 ${p.username} 的密碼（目前 ${p.pin}）：`, p.pin); if (v && v.length >= 4) { await updateDoc(doc(db, 'players', p.username), { pin: v }); await loadAll(); showAdminMsg(`已更新 ${p.username} 的密碼`); } else if (v) { showAdminMsg('密碼至少 4 位'); } }} style={btnGhost}>改密碼</button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
 
             {/* 玩家列表 */}
             <div style={{ overflowX: 'auto' }}>
