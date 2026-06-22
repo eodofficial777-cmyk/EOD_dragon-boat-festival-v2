@@ -132,7 +132,7 @@ const MOCK_RACE_TEAMS = [
 // 主 App
 // ============================================================
 export default function App() {
-  const [booths, setBooths] = useState(DEFAULT_BOOTHS);
+  const [booths, setBooths] = useState([]);
   const [userData, setUserData] = useState(null);
   const [view, setView] = useState('entry');
   const [selectedBooth, setSelectedBooth] = useState(null);
@@ -147,6 +147,8 @@ export default function App() {
   const [raceTeams, setRaceTeams] = useState([]);
   const [zoomFlagUrl, setZoomFlagUrl] = useState(null);
   const [adminUser, setAdminUser] = useState(null);
+  const [boothsLoading, setBoothsLoading] = useState(true);
+  const [raceLoading, setRaceLoading] = useState(true);
 
   const showMsg = (text, type = 'info') => {
     setMessage({ text, type });
@@ -175,7 +177,7 @@ export default function App() {
     const loadBooths = async () => {
       try {
         const boothSnap = await getDocs(collection(db, 'booths'));
-        if (boothSnap.empty) return;
+        if (boothSnap.empty) { setBooths([]); setBoothsLoading(false); return; }
         const boothsData = [];
         for (const boothDoc of boothSnap.docs) {
           const b = boothDoc.data();
@@ -213,6 +215,8 @@ export default function App() {
         setBooths(boothsData);
       } catch (err) {
         console.warn('攤位載入失敗:', err);
+      } finally {
+        setBoothsLoading(false);
       }
     };
     loadBooths();
@@ -233,8 +237,9 @@ export default function App() {
     const raceRef = ref(rtdb, 'race');
     const unsub = onValue(raceRef, (snapshot) => {
       const data = snapshot.val();
+      setRaceLoading(false);
       if (!data) {
-        setRaceTeams(MOCK_RACE_TEAMS);
+        setRaceTeams([]);
         return;
       }
       const teams = Object.entries(data).map(([key, t]) => ({
@@ -342,6 +347,8 @@ export default function App() {
   // ============================================================
   const handleDemoLogin = () => {
     const name = `旅人_${Math.floor(Math.random() * 10000)}`;
+    // 試玩模式載入教學示範攤位
+    setBooths(DEFAULT_BOOTHS);
     setUserData({
       username: name, pin: '0000', coins: 888,
       inventory: [{ id: 'demo-1', name: '歡迎禮包', price: 0, boothName: '系統贈送', description: '試玩模式贈品，正式活動會有攤位的真實商品', imageUrl: '', date: new Date().toLocaleDateString(), stackRotation: 3 }],
@@ -639,19 +646,35 @@ export default function App() {
             <div style={{ position: 'absolute', inset: 0, opacity: 0.03, backgroundImage: 'radial-gradient(#0d9488 1px, transparent 1px)', backgroundSize: '32px 32px', pointerEvents: 'none', zIndex: 0 }} />
 
             {/* 上排攤位 - 緊湊膠囊列 */}
-            <BoothPillRow booths={booths.filter(b => b.side === 'top')} stamps={userData.stamps} onOpen={openBooth} side="top" />
+            {boothsLoading ? (
+              <div style={{ flexShrink: 0, padding: '12px', display: 'flex', gap: 10, justifyContent: 'center' }}>
+                {[0, 1, 2].map(i => (
+                  <div key={i} style={{ width: 100, height: 100, borderRadius: 20, background: 'linear-gradient(90deg, #f1f5f9 25%, #e2e8f0 50%, #f1f5f9 75%)', backgroundSize: '200% 100%', animation: 'shimmer 1.5s infinite' }} />
+                ))}
+              </div>
+            ) : booths.length === 0 ? (
+              <div style={{ flexShrink: 0, padding: '20px 12px', textAlign: 'center' }}>
+                <span style={{ fontSize: 28 }}>🏮</span>
+                <p style={{ fontSize: 12, fontWeight: 800, color: '#0d9488', marginTop: 4 }}>攤位籌備中</p>
+                <p style={{ fontSize: 10, color: '#94a3b8', marginTop: 2 }}>攤主們正在報名，敬請期待！</p>
+              </div>
+            ) : (
+              <BoothPillRow booths={booths.filter(b => b.side === 'top')} stamps={userData.stamps} onOpen={openBooth} side="top" />
+            )}
 
             {/* ★ 河道賽況 - 絕對主角，佔滿剩餘空間 */}
             <div style={{ flex: 1, minHeight: 0, zIndex: 5, position: 'relative', display: 'flex', flexDirection: 'column' }}>
               <WaveDivider color="#0d9488" />
               <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
-                <RiverRaceTracker teams={raceTeams} onFlagClick={setZoomFlagUrl} />
+                <RiverRaceTracker teams={userData.isDemo && raceTeams.length === 0 ? MOCK_RACE_TEAMS : raceTeams} onFlagClick={setZoomFlagUrl} isDemo={userData.isDemo} loading={raceLoading && !userData.isDemo} />
               </div>
               <WaveDivider flip color="#0d9488" />
             </div>
 
             {/* 下排攤位 - 緊湊膠囊列 */}
-            <BoothPillRow booths={booths.filter(b => b.side === 'bottom')} stamps={userData.stamps} onOpen={openBooth} side="bottom" />
+            {!boothsLoading && booths.length > 0 && (
+              <BoothPillRow booths={booths.filter(b => b.side === 'bottom')} stamps={userData.stamps} onOpen={openBooth} side="bottom" />
+            )}
           </div>
         )}
 
@@ -789,7 +812,7 @@ export default function App() {
                     {userData.inventory.map((item, idx) => (
                       <div key={idx} style={{ width: 88, background: '#fff', padding: 8, borderRadius: 16, boxShadow: '0 2px 8px rgba(0,0,0,0.06)', border: '1px solid rgba(245,158,11,0.1)', transform: `rotate(${item.stackRotation || 0}deg)`, cursor: 'default', animation: `dropIn 0.4s cubic-bezier(0.175,0.885,0.32,1.275) ${idx * 0.06}s both` }}>
                         <div style={{ width: '100%', aspectRatio: '1', background: 'linear-gradient(135deg, #f0fdf4, #ecfdf5)', borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 28, marginBottom: 6, overflow: 'hidden' }}>
-                          {item.imageUrl ? <img src={item.imageUrl} style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={e => { e.target.style.display = 'none'; }} /> : (booths.find(b => b.name === item.boothName)?.emoji || '🎁')}
+                          {item.imageUrl ? <img src={item.imageUrl} style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={e => { e.target.style.display = 'none'; }} /> : (booths.find(b => b.id === item.boothId || b.name === item.boothName)?.emoji || '🎁')}
                         </div>
                         <p style={{ fontSize: 9, fontWeight: 800, textAlign: 'center', lineHeight: 1.2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.name}</p>
                         <p style={{ fontSize: 7, color: '#94a3b8', fontWeight: 600, textAlign: 'center', marginTop: 2 }}>{item.boothName}</p>
@@ -811,6 +834,12 @@ export default function App() {
             <h2 style={{ fontSize: 28, fontWeight: 900, fontFamily: '"Noto Serif TC", serif', marginBottom: 20, letterSpacing: 2 }}>集章紀念冊</h2>
             <div style={{ background: '#fff', padding: 28, borderRadius: 28, boxShadow: '0 8px 32px rgba(0,0,0,0.04)', border: '1px solid rgba(0,0,0,0.04)', marginBottom: 24 }}>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 20, marginBottom: 28 }}>
+                {booths.length === 0 && (
+                  <div style={{ gridColumn: '1 / -1', textAlign: 'center', padding: '30px 0', color: '#94a3b8' }}>
+                    <span style={{ fontSize: 32 }}>🏮</span>
+                    <p style={{ fontSize: 12, fontWeight: 700, marginTop: 8 }}>攤位籌備中，還沒有印章可以蒐集</p>
+                  </div>
+                )}
                 {booths.map((booth, i) => {
                   const stamped = userData.stamps.includes(booth.id);
                   return (
@@ -832,9 +861,22 @@ export default function App() {
                   <div style={{ height: '100%', borderRadius: 4, transition: 'width 0.8s cubic-bezier(0.16,1,0.3,1)', width: `${(userData.stamps.length / booths.length) * 100}%`, background: userData.stamps.length === booths.length ? 'linear-gradient(90deg, #fbbf24, #f59e0b)' : 'linear-gradient(90deg, #0d9488, #14b8a6)' }} />
                 </div>
               </div>
-              {userData.stamps.length === booths.length && (
-                <div style={{ textAlign: 'center', marginTop: 16, padding: '12px 20px', background: 'linear-gradient(135deg, #fef3c7, #fde68a)', borderRadius: 16, border: '1px solid rgba(245,158,11,0.2)' }}>
-                  <span style={{ fontSize: 13, fontWeight: 800, color: '#92400e' }}>🎉 恭喜完成所有集章！</span>
+              {userData.stamps.length === booths.length && booths.length > 0 && (
+                <div style={{ position: 'relative', textAlign: 'center', marginTop: 16, padding: '20px', background: 'linear-gradient(135deg, #fef3c7, #fde68a)', borderRadius: 20, border: '2px solid rgba(245,158,11,0.3)', overflow: 'hidden', animation: 'eggPop 0.6s cubic-bezier(0.16,1,0.3,1)' }}>
+                  {/* 漂浮粽子彩蛋 */}
+                  {['🐉', '🎉', '🏮', '✨', '🥇', '🎊'].map((icon, i) => (
+                    <span key={i} style={{ position: 'absolute', fontSize: 18, left: `${10 + i * 15}%`, top: '50%', animation: `eggFloat 2.5s ease-in-out ${i * 0.3}s infinite`, opacity: 0.7, pointerEvents: 'none' }}>{icon}</span>
+                  ))}
+                  <div style={{ position: 'relative', zIndex: 2 }}>
+                    <div style={{ fontSize: 36, marginBottom: 4, animation: 'eggBounce 1.5s ease-in-out infinite' }}>🏆</div>
+                    <p style={{ fontSize: 16, fontWeight: 900, color: '#92400e', fontFamily: '"Noto Serif TC", serif' }}>大功告成！</p>
+                    <p style={{ fontSize: 11, fontWeight: 700, color: '#a16207', marginTop: 4 }}>你已蒐集全部 {booths.length} 個印章，是慶典的完美旅人！</p>
+                  </div>
+                  <style>{`
+                    @keyframes eggPop { 0%{opacity:0;transform:scale(0.8)} 100%{opacity:1;transform:scale(1)} }
+                    @keyframes eggFloat { 0%,100%{transform:translateY(0) rotate(0deg)} 50%{transform:translateY(-16px) rotate(10deg)} }
+                    @keyframes eggBounce { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-6px)} }
+                  `}</style>
                 </div>
               )}
             </div>
@@ -874,6 +916,7 @@ export default function App() {
         @keyframes slideUp { from{opacity:0;transform:translateY(40px)} to{opacity:1;transform:translateY(0)} }
         @keyframes riverScroll { from{transform:translateX(90vw)} to{transform:translateX(-100%)} }
         @keyframes dropIn { 0%{opacity:0;transform:translateY(-30px) rotate(-15deg)} 60%{transform:translateY(5px) rotate(3deg)} 100%{opacity:1;transform:translateY(0)} }
+        @keyframes shimmer { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
       `}</style>
     </div>
   );
@@ -896,7 +939,8 @@ function calcRacePos(team) {
   }
 }
 
-function RiverRaceTracker({ teams, onFlagClick }) {
+function RiverRaceTracker({ teams, onFlagClick, isDemo, loading }) {
+  const [collapsed, setCollapsed] = useState(false);
   const [cheered, setCheered] = useState({});
   const [particles, setParticles] = useState([]);
   const containerRef = useRef(null);
@@ -925,16 +969,32 @@ function RiverRaceTracker({ teams, onFlagClick }) {
     }));
     setParticles(prev => [...prev, ...newP]);
     setTimeout(() => setParticles(prev => prev.filter(p => !newP.find(n => n.id === p.id))), 1200);
-    // 寫入 RTDB
-    const cheerRef = ref(rtdb, `race/${teamId}/cheers`);
-    runTransaction(cheerRef, (current) => (current || 0) + 1).catch(() => {});
+    // 寫入 RTDB（試玩/預覽模式不寫入真實資料庫）
+    if (!isDemo) {
+      const cheerRef = ref(rtdb, `race/${teamId}/cheers`);
+      runTransaction(cheerRef, (current) => (current || 0) + 1).catch(() => {});
+    }
   };
 
+  // 載入中
+  if (loading) {
+    return (
+      <div style={{ height: 140, background: 'linear-gradient(180deg, rgba(13,148,136,0.08), rgba(14,116,144,0.12))', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10 }}>
+        <div style={{ fontSize: 32, animation: 'boatRock 1.2s ease-in-out infinite' }}>🛶</div>
+        <span style={{ fontSize: 11, fontWeight: 700, color: '#0d9488', letterSpacing: 2 }}>賽況載入中...</span>
+        <style>{`@keyframes boatRock { 0%,100%{transform:rotate(-8deg) translateY(0)} 50%{transform:rotate(8deg) translateY(-4px)} }`}</style>
+      </div>
+    );
+  }
+
+  // 友善空狀態
   if (!teams.length) {
     return (
-      <div style={{ height: 140, background: 'linear-gradient(180deg, rgba(13,148,136,0.08), rgba(14,116,144,0.12))', display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative', overflow: 'hidden' }}>
-        <div style={{ position: 'absolute', display: 'flex', gap: 300, animation: 'riverScroll 20s linear infinite', fontSize: 40, opacity: 0.6 }}>🛶🐉🛶🐉</div>
-        <span style={{ fontSize: 36, fontWeight: 900, letterSpacing: '0.3em', color: 'rgba(13,148,136,0.08)', fontFamily: '"Noto Serif TC", serif', zIndex: 1 }}>DRAGON BOAT</span>
+      <div style={{ height: 140, background: 'linear-gradient(180deg, rgba(13,148,136,0.08), rgba(14,116,144,0.12))', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, position: 'relative', overflow: 'hidden' }}>
+        <div style={{ position: 'absolute', display: 'flex', gap: 300, animation: 'riverScroll 20s linear infinite', fontSize: 40, opacity: 0.25 }}>🛶🐉🛶🐉</div>
+        <span style={{ fontSize: 28, zIndex: 1 }}>🐉</span>
+        <span style={{ fontSize: 13, fontWeight: 800, color: '#0d9488', zIndex: 1 }}>龍舟賽即將開始</span>
+        <span style={{ fontSize: 10, fontWeight: 600, color: '#94a3b8', zIndex: 1 }}>隊伍報名中，敬請期待！</span>
       </div>
     );
   }
@@ -961,13 +1021,33 @@ function RiverRaceTracker({ teams, onFlagClick }) {
           <span style={{ fontSize: isMobile ? 10 : 12, fontWeight: 800, color: '#0d9488', letterSpacing: 2 }}>龍舟爭霸 LIVE</span>
           <div style={{ width: 6, height: 6, borderRadius: 3, background: '#22c55e', boxShadow: '0 0 6px #22c55e', animation: 'pulse 2s infinite' }} />
         </div>
-        <div style={{ display: 'flex', gap: 8, fontSize: 8, fontWeight: 700, color: '#94a3b8' }}>
+        <div style={{ display: 'flex', gap: 8, fontSize: 8, fontWeight: 700, color: '#94a3b8', alignItems: 'center' }}>
           <span>🔴 200折返</span>
           <span>🏁 400完賽</span>
+          {isMobile && (
+            <button onClick={() => setCollapsed(c => !c)} style={{ marginLeft: 4, padding: '3px 8px', borderRadius: 8, border: '1px solid rgba(13,148,136,0.2)', background: 'rgba(13,148,136,0.08)', color: '#0d9488', fontSize: 9, fontWeight: 800, cursor: 'pointer' }}>
+              {collapsed ? '展開 ▾' : '收起 ▴'}
+            </button>
+          )}
         </div>
       </div>
 
       {/* === Race lanes === */}
+      {isMobile && collapsed ? (
+        <div style={{ padding: '0 12px 8px', display: 'flex', flexDirection: 'column', gap: 4 }}>
+          {sorted.slice(0, 3).map((team, idx) => {
+            const total = team.outboundScore + (team.turnSuccess ? team.inboundScore : 0);
+            return (
+              <div key={team.id} style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'rgba(255,255,255,0.6)', borderRadius: 8, padding: '6px 10px' }}>
+                <span style={{ fontSize: 12 }}>{idx === 0 ? '🥇' : idx === 1 ? '🥈' : '🥉'}</span>
+                <span style={{ fontSize: 12, fontWeight: 800, color: '#1e293b', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{team.name}</span>
+                <span style={{ fontSize: 11, fontWeight: 800, fontFamily: 'monospace', color: '#0d9488' }}>{total}/400</span>
+              </div>
+            );
+          })}
+          <p style={{ textAlign: 'center', fontSize: 9, color: '#94a3b8', fontWeight: 600, marginTop: 2 }}>目前領先前三名 ・ 點「展開」看完整賽道</p>
+        </div>
+      ) : (
       <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: isMobile ? 6 : 6, padding: isMobile ? '0 8px' : '0 16px', justifyContent: sorted.length <= 4 ? 'center' : 'flex-start' }}>
         {sorted.map((team, idx) => {
           const pos = calcRacePos(team);
@@ -1157,6 +1237,7 @@ function RiverRaceTracker({ teams, onFlagClick }) {
           );
         })}
       </div>
+      )}
 
       {/* Floating particles */}
       {particles.map(p => (
@@ -1186,7 +1267,9 @@ function BoothPillRow({ booths, stamps, onOpen, side }) {
       [arr[i], arr[j]] = [arr[j], arr[i]];
     }
     return arr;
-  }, [booths]);
+    // 只用 booth id 列表當依賴，數量/成員不變就不重新洗牌（避免刷新統計時順序跳動）
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [booths.map(b => b.id).join(',')]);
 
   if (!shuffled.length) return null;
   return (
@@ -1350,6 +1433,8 @@ function Leaderboard({ booths, leaderboard, currentUser, currentUserStamps, onRe
   }
   players.sort((a, b) => b.stamps.length - a.stamps.length || a.username.localeCompare(b.username));
   players = players.map(p => ({ ...p, isMe: p.username === currentUser }));
+  const myRank = players.findIndex(p => p.isMe) + 1;
+  const myStampCount = currentUserStamps.length;
 
   return (
     <div style={{ animation: 'fadeSlideUp 0.6s ease-out 0.2s both' }}>
@@ -1359,6 +1444,26 @@ function Leaderboard({ booths, leaderboard, currentUser, currentUserStamps, onRe
           <span style={{ fontSize: 10, fontWeight: 700, color: '#94a3b8', background: '#f1f5f9', padding: '4px 10px', borderRadius: 8 }}>共 {players.length} 位</span>
         </div>
         <button onClick={onRefresh} style={{ fontSize: 10, fontWeight: 700, color: '#0d9488', background: 'rgba(13,148,136,0.08)', padding: '6px 14px', borderRadius: 10, border: 'none', cursor: 'pointer' }}>↻ 重整</button>
+      </div>
+
+      {/* 我的名次 置頂卡片 */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 18px', marginBottom: 16, borderRadius: 18, background: 'linear-gradient(135deg, #134e3a, #0d9488)', boxShadow: '0 6px 20px rgba(13,148,136,0.25)' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: 48 }}>
+          <span style={{ fontSize: 9, fontWeight: 700, color: 'rgba(255,255,255,0.6)', letterSpacing: 1 }}>我的名次</span>
+          <span style={{ fontSize: 26, fontWeight: 900, color: '#fff', fontFamily: 'monospace', lineHeight: 1 }}>{myRank > 0 ? `#${myRank}` : '-'}</span>
+        </div>
+        <div style={{ width: 1, height: 32, background: 'rgba(255,255,255,0.15)' }} />
+        <div style={{ flex: 1 }}>
+          <p style={{ fontSize: 13, fontWeight: 800, color: '#fff' }}>{currentUser}</p>
+          <p style={{ fontSize: 10, color: 'rgba(255,255,255,0.7)', fontWeight: 600, marginTop: 2 }}>
+            已集 {myStampCount}/{booths.length} 章
+            {myRank === 1 && myStampCount > 0 && ' ・ 目前第一名！🎉'}
+            {myRank > 1 && players[myRank - 2] && ` ・ 距前一名差 ${players[myRank - 2].stamps.length - myStampCount} 章`}
+          </p>
+        </div>
+        <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', maxWidth: 80, justifyContent: 'flex-end' }}>
+          {booths.map((b, i) => (<div key={i} style={{ width: 9, height: 9, borderRadius: '50%', background: currentUserStamps.includes(b.id) ? '#fbbf24' : 'rgba(255,255,255,0.2)' }} title={b.name} />))}
+        </div>
       </div>
 
       {/* Podium */}
