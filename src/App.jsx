@@ -64,7 +64,7 @@ function StampDesign({ stamp, size = 88, stamped = false, boothEmoji = '🏮' })
 // 工具
 // ============================================================
 const AVATAR_COLORS = ['#f87171','#fb923c','#fbbf24','#34d399','#22d3ee','#818cf8','#c084fc','#f472b6','#a78bfa','#6ee7b7'];
-function getAvatarColor(name) { let h = 0; for (let i = 0; i < name.length; i++) h = name.charCodeAt(i) + ((h << 5) - h); return AVATAR_COLORS[Math.abs(h) % AVATAR_COLORS.length]; }
+function getAvatarColor(name) { const s = String(name || '?'); let h = 0; for (let i = 0; i < s.length; i++) h = s.charCodeAt(i) + ((h << 5) - h); return AVATAR_COLORS[Math.abs(h) % AVATAR_COLORS.length]; }
 
 const WaveDivider = ({ flip, color = '#0d9488' }) => (
   <svg viewBox="0 0 1200 40" fill="none" style={{ display: 'block', width: '100%', marginBottom: flip ? 0 : -1, marginTop: flip ? -1 : 0, transform: flip ? 'rotate(180deg)' : 'none' }}>
@@ -131,7 +131,34 @@ const MOCK_RACE_TEAMS = [
 // ============================================================
 // 主 App
 // ============================================================
+// ============================================================
+// 錯誤邊界 - 避免整頁變空白
+// ============================================================
+class ErrorBoundary extends React.Component {
+  constructor(props) { super(props); this.state = { hasError: false, error: null }; }
+  static getDerivedStateFromError(error) { return { hasError: true, error }; }
+  componentDidCatch(error, info) { console.error('App crash:', error, info); }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 24, background: '#0f2922', color: '#fff', fontFamily: '"Noto Sans TC",sans-serif', textAlign: 'center' }}>
+          <div style={{ fontSize: 48, marginBottom: 16 }}>🛶</div>
+          <h1 style={{ fontSize: 18, fontWeight: 900, marginBottom: 8 }}>哎呀，畫面出了點狀況</h1>
+          <p style={{ fontSize: 12, color: 'rgba(167,215,195,0.7)', marginBottom: 16, maxWidth: 320 }}>請重新整理頁面試試。如果持續發生，把下面的訊息截圖回報：</p>
+          <pre style={{ fontSize: 10, color: '#fca5a5', background: 'rgba(0,0,0,0.3)', padding: 12, borderRadius: 8, maxWidth: '90vw', overflow: 'auto', textAlign: 'left' }}>{String(this.state.error?.message || this.state.error)}</pre>
+          <button onClick={() => window.location.reload()} style={{ marginTop: 20, padding: '12px 28px', background: 'linear-gradient(135deg, #fbbf24, #f59e0b)', color: '#134e3a', fontSize: 14, fontWeight: 900, border: 'none', borderRadius: 14, cursor: 'pointer' }}>重新整理</button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 export default function App() {
+  return <ErrorBoundary><AppInner /></ErrorBoundary>;
+}
+
+function AppInner() {
   const [booths, setBooths] = useState([]);
   const [userData, setUserData] = useState(null);
   const [view, setView] = useState('entry');
@@ -265,12 +292,12 @@ export default function App() {
     try {
       const snap = await getDocs(collection(db, 'players'));
       const players = snap.docs.map(d => {
-        const data = d.data();
+        const data = d.data() || {};
         return {
           username: d.id,
-          coins: data.coins || 0,
-          stamps: data.stamps || [],
-          inventory: data.inventory || [],
+          coins: Number(data.coins) || 0,
+          stamps: Array.isArray(data.stamps) ? data.stamps : [],
+          inventory: Array.isArray(data.inventory) ? data.inventory : [],
         };
       });
       players.sort((a, b) => b.stamps.length - a.stamps.length || a.username.localeCompare(b.username));
@@ -370,7 +397,8 @@ export default function App() {
     setSelectedBooth(booth);
     setCollectors([]);
     setView('booth');
-    loadCollectors(booth.id);
+    // 試玩/預覽模式不讀取雲端集章名單（完全隔離）
+    if (!userData?.isDemo) loadCollectors(booth.id);
   };
   const closeBooth = () => { setView('home'); setSelectedBooth(null); };
 
@@ -752,7 +780,7 @@ export default function App() {
               {/* 商品列表 */}
               <p style={{ fontSize: 10, fontWeight: 800, color: '#94a3b8', letterSpacing: 2, textTransform: 'uppercase', marginBottom: 12, marginTop: 28 }}>商品列表</p>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                {selectedBooth.items.map(item => (
+                {(selectedBooth.items || []).map(item => (
                   <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: 16, padding: 16, background: '#fafaf9', borderRadius: 20, border: '1px solid rgba(0,0,0,0.04)' }}>
                     <div style={{ width: 56, height: 56, borderRadius: 16, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 28, flexShrink: 0, overflow: 'hidden', background: 'linear-gradient(135deg, #e0f2fe, #f0fdf4)' }}>
                       {item.imageUrl ? <img src={item.imageUrl} style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={e => { e.target.style.display = 'none'; e.target.parentElement.textContent = selectedBooth.emoji; }} /> : selectedBooth.emoji}
@@ -858,7 +886,7 @@ export default function App() {
                   <span style={{ fontSize: 12, fontWeight: 900, color: '#0f172a' }}>{userData.stamps.length} / {booths.length}</span>
                 </div>
                 <div style={{ height: 8, background: '#f1f5f9', borderRadius: 4, overflow: 'hidden' }}>
-                  <div style={{ height: '100%', borderRadius: 4, transition: 'width 0.8s cubic-bezier(0.16,1,0.3,1)', width: `${(userData.stamps.length / booths.length) * 100}%`, background: userData.stamps.length === booths.length ? 'linear-gradient(90deg, #fbbf24, #f59e0b)' : 'linear-gradient(90deg, #0d9488, #14b8a6)' }} />
+                  <div style={{ height: '100%', borderRadius: 4, transition: 'width 0.8s cubic-bezier(0.16,1,0.3,1)', width: `${(userData.stamps.length / (booths.length || 1)) * 100}%`, background: booths.length > 0 && userData.stamps.length === booths.length ? 'linear-gradient(90deg, #fbbf24, #f59e0b)' : 'linear-gradient(90deg, #0d9488, #14b8a6)' }} />
                 </div>
               </div>
               {userData.stamps.length === booths.length && booths.length > 0 && (
@@ -880,7 +908,7 @@ export default function App() {
                 </div>
               )}
             </div>
-            <Leaderboard booths={booths} leaderboard={leaderboard} currentUser={userData.username} currentUserStamps={userData.stamps} onRefresh={loadLeaderboard} />
+            <Leaderboard booths={booths} leaderboard={leaderboard} currentUser={userData.username} currentUserStamps={userData.stamps} onRefresh={loadLeaderboard} isDemo={userData.isDemo} />
           </div>
         )}
       </main>
@@ -894,7 +922,7 @@ export default function App() {
         ].map(item => {
           const active = view === item.id || (view === 'booth' && item.id === 'home');
           return (
-            <button key={item.id} onClick={() => { if (item.id === 'stamps') loadLeaderboard(); if (view === 'booth' && item.id === 'home') closeBooth(); else setView(item.id); }}
+            <button key={item.id} onClick={() => { if (item.id === 'stamps' && !userData.isDemo) loadLeaderboard(); if (view === 'booth' && item.id === 'home') closeBooth(); else setView(item.id); }}
               onMouseEnter={() => setHoveredNav(item.id)} onMouseLeave={() => setHoveredNav(null)}
               style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, background: 'none', border: 'none', cursor: 'pointer', color: active ? '#0d9488' : '#cbd5e1', transition: 'all 0.3s', transform: active ? 'scale(1.1)' : hoveredNav === item.id ? 'scale(1.05)' : 'scale(1)' }}>
               <span style={{ fontSize: 24, filter: active ? 'none' : 'grayscale(1) opacity(0.4)' }}>{item.icon}</span>
@@ -1375,7 +1403,11 @@ function BoothCard({ booth, isStamped, onClick, delay = 0 }) {
 // ============================================================
 function CollectorsList({ collectors, currentUser, isStamped }) {
   const [expanded, setExpanded] = useState(false);
-  const allCollectors = [...collectors];
+  // collectors 可能是字串陣列（使用者名稱）或物件陣列，統一轉成物件
+  const normalized = (Array.isArray(collectors) ? collectors : []).map(c =>
+    typeof c === 'string' ? { username: c, timestamp: '' } : { username: c.username || '', timestamp: c.timestamp || '' }
+  );
+  const allCollectors = [...normalized];
   if (isStamped && !allCollectors.find(c => c.username === currentUser)) {
     allCollectors.unshift({ username: currentUser, timestamp: '剛剛', isMe: true });
   }
@@ -1395,13 +1427,13 @@ function CollectorsList({ collectors, currentUser, isStamped }) {
       <div style={{ background: '#fafaf9', borderRadius: 20, border: '1px solid rgba(0,0,0,0.04)', overflow: 'hidden' }}>
         {shown.map((c, idx) => (
           <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', borderBottom: idx < shown.length - 1 ? '1px solid rgba(0,0,0,0.04)' : 'none', background: c.isMe ? 'rgba(251,191,36,0.06)' : 'transparent' }}>
-            <div style={{ width: 36, height: 36, borderRadius: 12, flexShrink: 0, background: c.isMe ? 'linear-gradient(135deg, #fbbf24, #f59e0b)' : getAvatarColor(c.username), display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 800, color: '#fff', border: c.isMe ? '2px solid rgba(251,191,36,0.3)' : 'none' }}>{c.username.charAt(0)}</div>
+            <div style={{ width: 36, height: 36, borderRadius: 12, flexShrink: 0, background: c.isMe ? 'linear-gradient(135deg, #fbbf24, #f59e0b)' : getAvatarColor(c.username || '?'), display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 800, color: '#fff', border: c.isMe ? '2px solid rgba(251,191,36,0.3)' : 'none' }}>{(c.username || '?').charAt(0)}</div>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                 <span style={{ fontSize: 13, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.username}</span>
                 {c.isMe && <span style={{ fontSize: 8, fontWeight: 800, color: '#92400e', background: '#fef3c7', padding: '2px 8px', borderRadius: 6, letterSpacing: 1, flexShrink: 0 }}>YOU</span>}
               </div>
-              <p style={{ fontSize: 10, color: '#94a3b8', fontWeight: 600, marginTop: 1 }}>🕐 {c.timestamp}</p>
+              {c.timestamp && <p style={{ fontSize: 10, color: '#94a3b8', fontWeight: 600, marginTop: 1 }}>🕐 {c.timestamp}</p>}
             </div>
             <div style={{ width: 28, height: 28, borderRadius: 8, flexShrink: 0, background: 'rgba(220,38,38,0.06)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14 }}>🔖</div>
           </div>
@@ -1419,22 +1451,27 @@ function CollectorsList({ collectors, currentUser, isStamped }) {
 // ============================================================
 // 排行榜 (從 API 載入)
 // ============================================================
-function Leaderboard({ booths, leaderboard, currentUser, currentUserStamps, onRefresh }) {
+function Leaderboard({ booths, leaderboard, currentUser, currentUserStamps, onRefresh, isDemo }) {
   const [hoveredRow, setHoveredRow] = useState(null);
 
-  useEffect(() => { onRefresh(); }, []);
+  useEffect(() => { if (!isDemo) onRefresh(); }, []);
 
-  let players = [...leaderboard];
+  const boothCount = booths.length || 1;
+  const safeStamps = Array.isArray(currentUserStamps) ? currentUserStamps : [];
+  let players = (Array.isArray(leaderboard) ? leaderboard : []).map(p => ({
+    ...p,
+    stamps: Array.isArray(p.stamps) ? p.stamps : [],
+  }));
   const existingIdx = players.findIndex(p => p.username === currentUser);
   if (existingIdx >= 0) {
-    players[existingIdx] = { ...players[existingIdx], stamps: currentUserStamps, isMe: true };
+    players[existingIdx] = { ...players[existingIdx], stamps: safeStamps, isMe: true };
   } else {
-    players.push({ username: currentUser, stamps: currentUserStamps, isMe: true });
+    players.push({ username: currentUser, stamps: safeStamps, isMe: true });
   }
   players.sort((a, b) => b.stamps.length - a.stamps.length || a.username.localeCompare(b.username));
   players = players.map(p => ({ ...p, isMe: p.username === currentUser }));
   const myRank = players.findIndex(p => p.isMe) + 1;
-  const myStampCount = currentUserStamps.length;
+  const myStampCount = safeStamps.length;
 
   return (
     <div style={{ animation: 'fadeSlideUp 0.6s ease-out 0.2s both' }}>
@@ -1462,7 +1499,7 @@ function Leaderboard({ booths, leaderboard, currentUser, currentUserStamps, onRe
           </p>
         </div>
         <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', maxWidth: 80, justifyContent: 'flex-end' }}>
-          {booths.map((b, i) => (<div key={i} style={{ width: 9, height: 9, borderRadius: '50%', background: currentUserStamps.includes(b.id) ? '#fbbf24' : 'rgba(255,255,255,0.2)' }} title={b.name} />))}
+          {booths.map((b, i) => (<div key={i} style={{ width: 9, height: 9, borderRadius: '50%', background: safeStamps.includes(b.id) ? '#fbbf24' : 'rgba(255,255,255,0.2)' }} title={b.name} />))}
         </div>
       </div>
 
@@ -1500,7 +1537,7 @@ function Leaderboard({ booths, leaderboard, currentUser, currentUserStamps, onRe
         </div>
         {players.map((player, idx) => {
           const rank = idx + 1;
-          const pct = Math.round((player.stamps.length / booths.length) * 100);
+          const pct = Math.round((player.stamps.length / boothCount) * 100);
           return (
             <div key={idx} onMouseEnter={() => setHoveredRow(idx)} onMouseLeave={() => setHoveredRow(null)}
               style={{ display: 'flex', alignItems: 'center', padding: '14px 20px', borderBottom: idx < players.length - 1 ? '1px solid rgba(0,0,0,0.04)' : 'none', background: player.isMe ? 'rgba(251,191,36,0.06)' : hoveredRow === idx ? 'rgba(0,0,0,0.01)' : 'transparent', transition: 'all 0.2s', animation: `fadeSlideUp 0.3s ease-out ${idx * 0.04}s both` }}>
