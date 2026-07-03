@@ -4,58 +4,127 @@ import { collection, doc, getDoc, getDocs, setDoc, updateDoc, addDoc, deleteDoc,
 import { ref, onValue, runTransaction, set as rtdbSet, remove as rtdbRemove } from 'firebase/database';
 import { signInWithPopup, signOut, onAuthStateChanged } from 'firebase/auth';
 
-// ★ 管理員 UID（第一次登入後到 Firebase Console → Authentication 找你的 UID 填進來）
+// ★ 管理員 UID
 const ADMIN_UID = 'aYe1g9g27SViRei2gjAxTQmt5s13';
 
 // ============================================================
-// 印章元件 - 只需提供噗浪圖床網址即可
+// 主色系（維持 綠 + 米白，但走官網的線條科技風）
 // ============================================================
-function StampDesign({ stamp, size = 88, stamped = false, boothEmoji = '🏮' }) {
-  // 未集章：灰色佔位
+const C = {
+  ink: '#123f30',        // 深墨綠（主文字/深底）
+  teal: '#0d9488',       // 亮青綠（強調線條）
+  tealDim: 'rgba(13,148,136,0.35)',
+  line: 'rgba(18,63,48,0.22)',   // 卡片邊線
+  cream: '#f4f1e6',      // 頁面底
+  paper: '#fdfcf6',      // 卡片底
+  gold: '#b7791f',       // 金（購物金/獎章）
+  goldBg: '#f6ead2',
+  red: '#c2410c',        // 事件負面/警示
+};
+
+// 切角外形（模仿官網的科技框：左上、右下切角）
+const CUT = (c = 10) => `polygon(${c}px 0, 100% 0, 100% calc(100% - ${c}px), calc(100% - ${c}px) 100%, 0 100%, 0 ${c}px)`;
+
+// ============================================================
+// 線條 SVG 圖示系統（取代 emoji；風格同拾獲手機的 ICONS）
+// 想加新圖示：在這裡加一組 24x24 的 stroke path 即可
+// ============================================================
+const ICON_PATHS = {
+  boat: '<path d="M2.5 14.5h13.5c2.4 0 4.3-1.2 5-3.2"/><path d="M4.5 14.5l1.6 3.4h9.6l1.5-3.4"/><path d="M19.5 12.2c1.3-.3 2.2-1.3 2.4-2.6-1.4-.2-2.6.3-3.2 1.4"/><path d="M7 11.5V9M10.5 11.5V8.2M14 11.5V9"/>',
+  coin: '<circle cx="12" cy="12" r="8"/><path d="M12 8.2v7.6M9.4 10.4h5.2M9.4 13.6h5.2"/>',
+  stamp: '<circle cx="12" cy="12" r="7.6"/><circle cx="12" cy="12" r="4" stroke-dasharray="2.4 2.4"/>',
+  book: '<path d="M4.5 5a2 2 0 0 1 2-2H19v18H6.5a2 2 0 0 1-2-2z"/><path d="M8.5 3v18"/><path d="M12 8h4M12 11h4"/>',
+  bag: '<path d="M5.5 8h13l-1.1 11.5H6.6z"/><path d="M9 8a3 3 0 0 1 6 0"/>',
+  map: '<path d="M9 4 4 6v14l5-2 6 2 5-2V4l-5 2z"/><path d="M9 4v14M15 6v14"/>',
+  trophy: '<path d="M7.5 4h9v4.5a4.5 4.5 0 0 1-9 0z"/><path d="M7.5 5H4.5a3 3 0 0 0 3 3.6M16.5 5h3a3 3 0 0 1-3 3.6"/><path d="M12 13v3.5M8.5 20h7M10.2 16.5h3.6V20h-3.6z"/>',
+  medal: '<circle cx="12" cy="14.5" r="4.6"/><path d="M9 10.8 6.5 3.5h4L12 8l1.5-4.5h4L15 10.8"/>',
+  check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
+  chevL: '<path d="M14.5 5.5 8 12l6.5 6.5"/>',
+  chevR: '<path d="M9.5 5.5 16 12l-6.5 6.5"/>',
+  external: '<path d="M8.5 5.5H18.5V15.5"/><path d="M18.5 5.5 6 18"/>',
+  refresh: '<path d="M20 12a8 8 0 1 1-2.3-5.6"/><path d="M20.2 3.2v4.4h-4.4"/>',
+  flag: '<path d="M6 3v18"/><path d="M6 4.5h11l-2.6 3.5L17 11.5H6"/>',
+  heart: '<path d="M12 19.5s-6.6-4.2-8.4-8.3A4.6 4.6 0 0 1 12 7.6a4.6 4.6 0 0 1 8.4 3.6c-1.8 4.1-8.4 8.3-8.4 8.3z"/>',
+  lock: '<rect x="5.5" y="10.5" width="13" height="9.5" rx="1"/><path d="M8.5 10.5V7.5a3.5 3.5 0 0 1 7 0v3"/>',
+  user: '<circle cx="12" cy="8" r="3.8"/><path d="M4.8 20a7.5 7.5 0 0 1 14.4 0"/>',
+  lantern: '<path d="M8.2 6.5h7.6c1.9 2.6 1.9 7.4 0 10H8.2c-1.9-2.6-1.9-7.4 0-10z"/><path d="M12 3.5v3M12 16.5v2.5M10 21h4"/><path d="M9.8 6.8c-.9 2.8-.9 6.6 0 9.4M14.2 6.8c.9 2.8.9 6.6 0 9.4"/>',
+  spark: '<path d="M12 3.5 13.7 9 19 10.7 13.7 12.4 12 18 10.3 12.4 5 10.7 10.3 9z"/>',
+  fish: '<path d="M2.5 12c3.6-4.6 9.2-4.8 13-1.2l5-2.8-1.1 4 1.1 4-5-2.8c-3.8 3.6-9.4 3.4-13-1.2z"/><circle cx="7" cy="11.2" r=".9" fill="currentColor" stroke="none"/>',
+  wind: '<path d="M3 8h10.5a2.4 2.4 0 1 0-2.4-2.6"/><path d="M3 12h15a2.4 2.4 0 1 1-2.4 2.6"/><path d="M3 16h7.5a2 2 0 1 1-2 2.2"/>',
+  wave: '<path d="M2.5 10.5c2-2.8 4-2.8 6 0s4 2.8 6 0 4-2.8 6 0"/><path d="M2.5 15.5c2-2.8 4-2.8 6 0s4 2.8 6 0 4-2.8 6 0"/>',
+  dice: '<rect x="4" y="4" width="16" height="16" rx="2.5"/><circle cx="8.6" cy="8.6" r="1.2" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.2" fill="currentColor" stroke="none"/><circle cx="15.4" cy="15.4" r="1.2" fill="currentColor" stroke="none"/>',
+  close: '<path d="M6 6l12 12M18 6 6 18"/>',
+  logout: '<path d="M9.5 5H5v14h4.5"/><path d="M13.5 8l4 4-4 4M17.5 12H9"/>',
+  gift: '<rect x="4" y="9" width="16" height="11" rx="1"/><path d="M12 9v11M4 13h16"/><path d="M12 9c-1-2.8-3-4.2-4.6-3.4S6.6 9 9 9zM12 9c1-2.8 3-4.2 4.6-3.4S17.4 9 15 9z"/>',
+};
+function Icon({ name, size = 16, color = 'currentColor', sw = 1.7, style }) {
+  return (
+    <svg viewBox="0 0 24 24" width={size} height={size} fill="none" stroke={color}
+      strokeWidth={sw} strokeLinecap="round" strokeLinejoin="round"
+      style={{ flexShrink: 0, display: 'block', ...style }}
+      dangerouslySetInnerHTML={{ __html: ICON_PATHS[name] || '' }} />
+  );
+}
+
+// 官網風角落括號（掛在 position:relative 的容器內）
+const Corners = ({ color = C.teal, size = 9, w = 1.5, inset = -1 }) => (
+  <>
+    {[['top', 'left'], ['top', 'right'], ['bottom', 'left'], ['bottom', 'right']].map(([v, h], i) => (
+      <span key={i} style={{
+        position: 'absolute', [v]: inset, [h]: inset, width: size, height: size, pointerEvents: 'none', zIndex: 3,
+        borderTop: v === 'top' ? `${w}px solid ${color}` : 'none',
+        borderBottom: v === 'bottom' ? `${w}px solid ${color}` : 'none',
+        borderLeft: h === 'left' ? `${w}px solid ${color}` : 'none',
+        borderRight: h === 'right' ? `${w}px solid ${color}` : 'none',
+      }} />
+    ))}
+  </>
+);
+
+// 小型六角標籤（官網的「服」「武」那種）
+const HexTag = ({ children, color = C.ink, bg = C.paper, size = 34 }) => (
+  <div style={{
+    width: size, height: size * 1.1, background: bg, color,
+    clipPath: 'polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%)',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    fontSize: size * 0.4, fontWeight: 900, fontFamily: '"Noto Serif TC", serif', flexShrink: 0,
+  }}>{children}</div>
+);
+
+// ============================================================
+// 印章元件（保留噗浪圖床網址機制）
+// ============================================================
+function StampDesign({ stamp, size = 88, stamped = false, boothEmoji = '', rotate = 0 }) {
   if (!stamped) {
     return (
       <div style={{
         width: size, height: size, borderRadius: '50%',
-        border: '3px dashed #e2e8f0', background: '#fafafa',
+        border: `1.5px dashed ${C.line}`, background: 'rgba(18,63,48,0.03)',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
-        overflow: 'hidden'
       }}>
-        <span style={{ fontSize: size * 0.36, color: '#e2e8f0', fontWeight: 900 }}>?</span>
+        <Icon name="stamp" size={size * 0.4} color="rgba(18,63,48,0.18)" />
       </div>
     );
   }
-
-  // 有圖片 → 圓形印章
-  if (stamp.imageUrl) {
+  const ring = {
+    width: size, height: size, borderRadius: '50%', overflow: 'hidden',
+    border: `1.5px solid ${C.tealDim}`, boxShadow: `0 0 0 4px ${C.paper}, 0 0 0 5px ${C.line}`,
+    position: 'relative', background: '#fff', transform: `rotate(${rotate}deg)`,
+  };
+  if (stamp && stamp.imageUrl) {
     return (
-      <div style={{
-        width: size, height: size, borderRadius: '50%', overflow: 'hidden',
-        border: '3px solid rgba(13,148,136,0.2)',
-        boxShadow: '0 4px 16px rgba(0,0,0,0.1)',
-        position: 'relative', background: '#fff'
-      }}>
-        <img src={stamp.imageUrl} alt="stamp"
-          style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-          onError={(e) => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'flex'; }}
-        />
-        <div style={{ display: 'none', position: 'absolute', inset: 0, alignItems: 'center', justifyContent: 'center', fontSize: size * 0.4, background: 'linear-gradient(135deg, #ecfdf5, #f0fdf4)' }}>
-          {boothEmoji}
+      <div style={ring}>
+        <img src={stamp.imageUrl} alt="stamp" style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+          onError={(e) => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'flex'; }} />
+        <div style={{ display: 'none', position: 'absolute', inset: 0, alignItems: 'center', justifyContent: 'center', fontSize: size * 0.38, background: '#f2f7f2' }}>
+          {boothEmoji || <Icon name="lantern" size={size * 0.4} color={C.teal} />}
         </div>
       </div>
     );
   }
-
-  // 無圖片 fallback → emoji 圓形
   return (
-    <div style={{
-      width: size, height: size, borderRadius: '50%', overflow: 'hidden',
-      border: '3px solid rgba(13,148,136,0.2)',
-      boxShadow: '0 4px 16px rgba(0,0,0,0.08)',
-      background: 'linear-gradient(135deg, #ecfdf5, #f0fdf4)',
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-      fontSize: size * 0.4
-    }}>
-      {boothEmoji}
+    <div style={{ ...ring, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: size * 0.38, background: '#f2f7f2' }}>
+      {boothEmoji || <Icon name="lantern" size={size * 0.4} color={C.teal} />}
     </div>
   );
 }
@@ -63,27 +132,37 @@ function StampDesign({ stamp, size = 88, stamped = false, boothEmoji = '🏮' })
 // ============================================================
 // 工具
 // ============================================================
-const AVATAR_COLORS = ['#f87171','#fb923c','#fbbf24','#34d399','#22d3ee','#818cf8','#c084fc','#f472b6','#a78bfa','#6ee7b7'];
+const AVATAR_COLORS = ['#b45309', '#0f766e', '#4d7c0f', '#0e7490', '#7c3aed', '#be185d', '#166534', '#a16207', '#1d4ed8', '#9f1239'];
 function getAvatarColor(name) { const s = String(name || '?'); let h = 0; for (let i = 0; i < s.length; i++) h = s.charCodeAt(i) + ((h << 5) - h); return AVATAR_COLORS[Math.abs(h) % AVATAR_COLORS.length]; }
 
-const WaveDivider = ({ flip, color = '#0d9488' }) => (
-  <svg viewBox="0 0 1200 40" fill="none" style={{ display: 'block', width: '100%', marginBottom: flip ? 0 : -1, marginTop: flip ? -1 : 0, transform: flip ? 'rotate(180deg)' : 'none' }}>
-    <path d="M0 20C200 0 400 40 600 20C800 0 1000 40 1200 20V40H0V20Z" fill={color} fillOpacity="0.08" />
+// 官網風分隔線（取代波浪）
+const TechDivider = ({ flip }) => (
+  <svg viewBox="0 0 1200 14" preserveAspectRatio="none"
+    style={{ display: 'block', width: '100%', height: 10, transform: flip ? 'scaleY(-1)' : 'none' }}>
+    <path d="M0 7 H492 L508 1 H692 L708 7 H1200" fill="none" stroke={C.tealDim} strokeWidth="1.5" />
+    <path d="M540 11 H660" stroke="rgba(13,148,136,0.2)" strokeWidth="1" />
   </svg>
 );
 
-const RANK_STYLES = [
-  { bg: 'linear-gradient(135deg, #fef3c7, #fde68a)', border: '#fbbf24', medal: '🥇', glow: 'rgba(251,191,36,0.15)' },
-  { bg: 'linear-gradient(135deg, #f1f5f9, #e2e8f0)', border: '#94a3b8', medal: '🥈', glow: 'rgba(148,163,184,0.12)' },
-  { bg: 'linear-gradient(135deg, #fef2f2, #fde2c8)', border: '#d97706', medal: '🥉', glow: 'rgba(217,119,6,0.1)' },
+const RANK_COLOR = ['#b7791f', '#7d8590', '#a05e2b'];
+
+// ============================================================
+// 龍舟賽事件（第5點需求）：管理後台每輪可套用
+// 要加事件就往這個陣列加，delta 為前進點數增減
+// ============================================================
+const RACE_EVENTS = [
+  { id: 'salmon', name: '災厄鮭襲擊', delta: -5, icon: 'fish' },
+  { id: 'undertow', name: '暗流纏槳', delta: -3, icon: 'wave' },
+  { id: 'wind', name: '大順風', delta: 5, icon: 'wind' },
+  { id: 'bless', name: '龍神庇佑', delta: 8, icon: 'spark' },
 ];
 
-// 預設攤位 (如果 API 還沒回來的 fallback)
+// 預設攤位（試玩模式 fallback）
 const DEFAULT_BOOTHS = [
   {
-    id: 'booth-demo-1', side: 'top', name: '🍱 示範攤位（上排）', emoji: '🍱',
+    id: 'booth-demo-1', side: 'top', name: '示範攤位（上排）', emoji: '🍱',
     stamp: { imageUrl: '' },
-    stampHint: '⬆ 這是沒上傳印章時的預設樣式（使用攤位 emoji）。攤主可上傳自製印章圖到噗浪，貼上圖床網址即可替換。',
+    stampHint: '這是沒上傳印章時的預設樣式。攤主可上傳自製印章圖到噗浪，貼上圖床網址即可替換。',
     facadeImageUrl: '',
     description: '這裡是攤位介紹文字，可以寫攤位的故事、特色、主題等。建議 2-3 句話讓玩家了解這個攤位在做什麼。',
     plurkUrl: 'https://www.plurk.com/p/你的噗文網址',
@@ -95,9 +174,9 @@ const DEFAULT_BOOTHS = [
     stats: { stampCount: 12, salesCount: 8, salesRevenue: 360 },
   },
   {
-    id: 'booth-demo-2', side: 'top', name: '🎮 小遊戲攤位', emoji: '🎮',
+    id: 'booth-demo-2', side: 'top', name: '小遊戲攤位', emoji: '🎮',
     stamp: { imageUrl: '' },
-    stampHint: '⬆ 建議製作 300×300 以上的正方形印章圖，上傳到噗浪後把圖床網址填到 stampImageUrl 欄位。',
+    stampHint: '建議製作 300×300 以上、去背 PNG 的印章圖，上傳噗浪後把圖床網址填到 stampImageUrl 欄位。',
     facadeImageUrl: '',
     description: '如果攤位有小遊戲，可以在這裡說明遊戲規則和玩法。也可以放遊戲的連結讓玩家直接進入遊玩。',
     plurkUrl: 'https://www.plurk.com/p/你的小遊戲噗文',
@@ -108,31 +187,33 @@ const DEFAULT_BOOTHS = [
     stats: { stampCount: 5, salesCount: 2, salesRevenue: 200 },
   },
   {
-    id: 'booth-demo-3', side: 'bottom', name: '🎨 創作展示攤', emoji: '🎨',
+    id: 'booth-demo-3', side: 'bottom', name: '創作展示攤', emoji: '🎨',
     stamp: { imageUrl: '' },
-    stampHint: '⬆ 沒有自訂印章的攤位會用 emoji 當作印章圖案，也很可愛！',
+    stampHint: '沒有自訂印章的攤位會用 emoji 或燈籠線條圖當作印章圖案。',
     facadeImageUrl: '',
     description: '攤位也可以用來展示創作作品，封面圖（facadeImageUrl）請上傳到噗浪取得圖床網址，建議 300×300 以上正方形圖片。',
     plurkUrl: 'https://www.plurk.com/p/你的創作噗文',
-    task: '欣賞完作品後，在噗浪留下你的感想即可集章 ✨',
+    task: '欣賞完作品後，在噗浪留下你的感想即可集章',
     items: [],
     stats: { stampCount: 3, salesCount: 0, salesRevenue: 0 },
   },
 ];
 
-// 模擬龍舟賽資料
+// 模擬龍舟賽資料（含事件示範）
 const MOCK_RACE_TEAMS = [
-  { id: 1, name: '南港輪胎隊', color: '#dc2626', flagImageUrl: '', outboundScore: 120, inboundScore: 0, turnSuccess: false, cheers: 88, lastRolls: [15, 20, 18, 5, 2] },
-  { id: 2, name: '屈原不想下水隊', color: '#2563eb', flagImageUrl: 'https://images.plurk.com/2HjjzKJMBWLsFSHYdLaNAv.png', outboundScore: 200, inboundScore: 0, turnSuccess: false, cheers: 156, lastRolls: [20, 20, 20, 20, 20] },
-  { id: 3, name: '粽子吃到飽隊', color: '#16a34a', flagImageUrl: '', outboundScore: 200, inboundScore: 60, turnSuccess: true, cheers: 342, lastRolls: [1, 3, 2, 5, 4] },
-  { id: 4, name: '極速龍舟傳說', color: '#9333ea', flagImageUrl: 'https://images.plurk.com/2HjjzKJMBWLsFSHYdLaNAv.png', outboundScore: 200, inboundScore: 200, turnSuccess: true, cheers: 999, lastRolls: [] },
+  { id: 1, name: '南港輪胎隊', color: '#c2410c', flagImageUrl: '', outboundScore: 120, inboundScore: 0, turnSuccess: false, cheers: 88, lastRolls: [15, 20, 18, 5, 2], lastEvent: { name: '災厄鮭襲擊', delta: -5, icon: 'fish' } },
+  { id: 2, name: '屈原不想下水隊', color: '#1d4ed8', flagImageUrl: 'https://images.plurk.com/2HjjzKJMBWLsFSHYdLaNAv.png', outboundScore: 200, inboundScore: 0, turnSuccess: false, cheers: 156, lastRolls: [20, 20, 20, 20, 20], lastEvent: null },
+  { id: 3, name: '粽子吃到飽隊', color: '#15803d', flagImageUrl: '', outboundScore: 200, inboundScore: 60, turnSuccess: true, cheers: 342, lastRolls: [1, 3, 2, 5, 4], lastEvent: { name: '大順風', delta: 5, icon: 'wind' } },
+  { id: 4, name: '極速龍舟傳說', color: '#7c3aed', flagImageUrl: 'https://images.plurk.com/2HjjzKJMBWLsFSHYdLaNAv.png', outboundScore: 200, inboundScore: 200, turnSuccess: true, cheers: 999, lastRolls: [], lastEvent: null },
+];
+const MOCK_RACE_EVENTS = [
+  { t: 3, team: '粽子吃到飽隊', name: '大順風', delta: 5, icon: 'wind' },
+  { t: 2, team: '南港輪胎隊', name: '災厄鮭襲擊', delta: -5, icon: 'fish' },
+  { t: 1, team: '屈原不想下水隊', name: '龍神庇佑', delta: 8, icon: 'spark' },
 ];
 
 // ============================================================
-// 主 App
-// ============================================================
-// ============================================================
-// 錯誤邊界 - 避免整頁變空白
+// 錯誤邊界
 // ============================================================
 class ErrorBoundary extends React.Component {
   constructor(props) { super(props); this.state = { hasError: false, error: null }; }
@@ -142,11 +223,11 @@ class ErrorBoundary extends React.Component {
     if (this.state.hasError) {
       return (
         <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 24, background: '#0f2922', color: '#fff', fontFamily: '"Noto Sans TC",sans-serif', textAlign: 'center' }}>
-          <div style={{ fontSize: 48, marginBottom: 16 }}>🛶</div>
+          <Icon name="boat" size={48} color="#fbbf24" style={{ marginBottom: 16 }} />
           <h1 style={{ fontSize: 18, fontWeight: 900, marginBottom: 8 }}>哎呀，畫面出了點狀況</h1>
           <p style={{ fontSize: 12, color: 'rgba(167,215,195,0.7)', marginBottom: 16, maxWidth: 320 }}>請重新整理頁面試試。如果持續發生，把下面的訊息截圖回報：</p>
           <pre style={{ fontSize: 10, color: '#fca5a5', background: 'rgba(0,0,0,0.3)', padding: 12, borderRadius: 8, maxWidth: '90vw', overflow: 'auto', textAlign: 'left' }}>{String(this.state.error?.message || this.state.error)}</pre>
-          <button onClick={() => window.location.reload()} style={{ marginTop: 20, padding: '12px 28px', background: 'linear-gradient(135deg, #fbbf24, #f59e0b)', color: '#134e3a', fontSize: 14, fontWeight: 900, border: 'none', borderRadius: 14, cursor: 'pointer' }}>重新整理</button>
+          <button onClick={() => window.location.reload()} style={{ marginTop: 20, padding: '12px 28px', background: 'linear-gradient(135deg, #fbbf24, #f59e0b)', color: '#134e3a', fontSize: 14, fontWeight: 900, border: 'none', clipPath: CUT(8), cursor: 'pointer' }}>重新整理</button>
         </div>
       );
     }
@@ -183,9 +264,7 @@ function AppInner() {
     setTimeout(() => setMessage(null), 3000);
   };
 
-  // ============================================================
   // 監聽管理員登入狀態
-  // ============================================================
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (user) => {
       if (user && user.uid === ADMIN_UID) {
@@ -198,9 +277,7 @@ function AppInner() {
     return () => unsub();
   }, []);
 
-  // ============================================================
-  // 載入攤位資料（Firestore 即時監聽）
-  // ============================================================
+  // 載入攤位資料（Firestore）
   useEffect(() => {
     const loadBooths = async () => {
       try {
@@ -209,12 +286,10 @@ function AppInner() {
         const boothsData = [];
         for (const boothDoc of boothSnap.docs) {
           const b = boothDoc.data();
-          // 讀取子集合 items
           const itemSnap = await getDocs(collection(db, 'booths', boothDoc.id, 'items'));
           const items = itemSnap.docs.map(d => ({ id: d.id, ...d.data() }));
           boothsData.push({ id: boothDoc.id, ...b, stamp: { imageUrl: b.stampImageUrl || '' }, items });
         }
-        // 計算統計
         const stampSnap = await getDocs(collection(db, 'stampLogs'));
         const stampCount = {};
         stampSnap.docs.forEach(d => {
@@ -258,18 +333,13 @@ function AppInner() {
     }
   }, [booths]);
 
-  // ============================================================
-  // 龍舟賽況（RTDB 即時同步 — 不需輪詢！）
-  // ============================================================
+  // 龍舟賽況（RTDB 即時同步）
   useEffect(() => {
     const raceRef = ref(rtdb, 'race');
     const unsub = onValue(raceRef, (snapshot) => {
       const data = snapshot.val();
       setRaceLoading(false);
-      if (!data) {
-        setRaceTeams([]);
-        return;
-      }
+      if (!data) { setRaceTeams([]); return; }
       const teams = Object.entries(data).map(([key, t]) => ({
         id: key,
         name: t.name || '',
@@ -280,15 +350,14 @@ function AppInner() {
         turnSuccess: t.turnSuccess === true || t.turnSuccess === 'true',
         cheers: Number(t.cheers) || 0,
         lastRolls: t.lastRolls ? String(t.lastRolls).split(',').map(n => parseInt(n)).filter(n => !isNaN(n)) : [],
+        lastEvent: t.lastEvent || null,   // ★ 本輪事件
       }));
       setRaceTeams(teams);
     });
     return () => unsub();
   }, []);
 
-  // ============================================================
-  // 載入排行榜（Firestore）
-  // ============================================================
+  // 載入排行榜
   const loadLeaderboard = useCallback(async () => {
     try {
       const snap = await getDocs(collection(db, 'players'));
@@ -306,27 +375,21 @@ function AppInner() {
     } catch (err) { console.warn('排行榜載入失敗:', err); }
   }, []);
 
-  // ============================================================
-  // 載入集章名單（Firestore）
-  // ============================================================
+  // 載入集章名單
   const loadCollectors = useCallback(async (boothId) => {
     try {
       const q = query(collection(db, 'stampLogs'), where('boothId', '==', boothId));
       const snap = await getDocs(q);
       const list = snap.docs.map(d => d.data().username);
-      // 去重
       setCollectors([...new Set(list)]);
     } catch (err) { console.warn('集章名單載入失敗:', err); }
   }, []);
 
-  // ============================================================
-  // 註冊（Firestore）
-  // ============================================================
+  // 註冊
   const handleRegister = async () => {
     if (!inputName.trim() || inputPin.length < 4) return showMsg('請輸入暱稱和至少4位數的密碼！', 'warn');
     setLoading(true);
     try {
-      // 檢查註冊開關
       const settingsSnap = await getDoc(doc(db, 'settings', 'general'));
       if (settingsSnap.exists()) {
         const s = settingsSnap.data();
@@ -336,10 +399,8 @@ function AppInner() {
       }
       const username = inputName.trim();
       const pin = inputPin.trim();
-      // 檢查是否存在
       const existing = await getDoc(doc(db, 'players', username));
       if (existing.exists()) return showMsg('此名稱已有人使用', 'warn');
-      // 建立帳號
       const newPlayer = { pin, coins: 500, inventory: [], stamps: [], createdAt: Timestamp.now() };
       await setDoc(doc(db, 'players', username), newPlayer);
       setUserData({ username, ...newPlayer, stamps: [], inventory: [] });
@@ -350,9 +411,7 @@ function AppInner() {
     } finally { setLoading(false); }
   };
 
-  // ============================================================
-  // 登入（Firestore）
-  // ============================================================
+  // 登入
   const handleLogin = async () => {
     if (!inputName.trim() || !inputPin.trim()) return showMsg('請輸入暱稱和密碼！', 'warn');
     setLoading(true);
@@ -370,12 +429,9 @@ function AppInner() {
     } finally { setLoading(false); }
   };
 
-  // ============================================================
   // 試玩
-  // ============================================================
   const handleDemoLogin = () => {
     const name = `旅人_${Math.floor(Math.random() * 10000)}`;
-    // 試玩模式載入教學示範攤位
     setBooths(DEFAULT_BOOTHS);
     setUserData({
       username: name, pin: '0000', coins: 888,
@@ -391,19 +447,16 @@ function AppInner() {
     showMsg('已安全登出。');
   };
 
-  // ============================================================
   // 開啟攤位
-  // ============================================================
   const openBooth = (booth) => {
     setSelectedBooth(booth);
     setCollectors([]);
     setView('booth');
-    // 試玩/預覽模式不讀取雲端集章名單（完全隔離）
     if (!userData?.isDemo) loadCollectors(booth.id);
   };
   const closeBooth = () => { setView('home'); setSelectedBooth(null); };
 
-  // 手動刷新攤位資料（含統計）
+  // 手動刷新攤位資料
   const [refreshing, setRefreshing] = useState(false);
   const refreshBooths = async () => {
     if (refreshing) return;
@@ -443,16 +496,14 @@ function AppInner() {
     }
   };
 
-  // ============================================================
-  // 購買（Firestore）
-  // ============================================================
+  // 購買
   const buyItem = async (booth, item) => {
     if (userData.coins < item.price) return showMsg('購物金不足喔！', 'warn');
 
     const newItem = { ...item, boothId: booth.id, boothName: booth.name, date: new Date().toLocaleDateString(), stackRotation: Math.floor(Math.random() * 10) - 5 };
     const optimistic = { ...userData, coins: userData.coins - item.price, inventory: [...userData.inventory, newItem] };
     setUserData(optimistic);
-    showMsg(`成功購買 ${item.name}！`, 'success');
+    showMsg(`成功購買 ${item.name}！已丟進購物袋`, 'success');
 
     if (!userData.isDemo) {
       try {
@@ -470,7 +521,6 @@ function AppInner() {
             stackRotation: Math.floor(Math.random() * 10) - 5
           })
         });
-        // 重新讀取最新資料
         const snap = await getDoc(doc(db, 'players', userData.username));
         if (snap.exists()) {
           const d = snap.data();
@@ -480,15 +530,12 @@ function AppInner() {
     }
   };
 
-  // ============================================================
-  // 集章（Firestore）
-  // ============================================================
+  // 集章
   const collectStamp = async (boothId) => {
     if (userData.stamps.includes(boothId)) return showMsg('這個章你已經領過囉！');
 
     const optimistic = { ...userData, coins: userData.coins + 50, stamps: [...userData.stamps, boothId] };
     setUserData(optimistic);
-    // 顯示集章確認卡（放大可愛的印章圖）
     const booth = booths.find(b => b.id === boothId) || selectedBooth;
     if (booth) {
       setStampReveal({
@@ -520,20 +567,19 @@ function AppInner() {
     }
   };
 
-  // --- 管理員浮動按鈕（在玩家畫面時顯示）---
+  // 管理員浮動按鈕
   const adminFloatingBtn = (adminUser && view !== 'admin') ? (
     <button onClick={() => setView('admin')} style={{
       position: 'fixed', bottom: 100, right: 16, zIndex: 999,
-      padding: '10px 16px', borderRadius: 16,
+      padding: '10px 16px', clipPath: CUT(8),
       background: 'linear-gradient(135deg, #1e40af, #3b82f6)',
       color: '#fff', fontSize: 11, fontWeight: 800,
       border: 'none', cursor: 'pointer',
-      boxShadow: '0 4px 20px rgba(59,130,246,0.4)',
       display: 'flex', alignItems: 'center', gap: 6
-    }}>🔐 回管理後台</button>
+    }}><Icon name="lock" size={13} color="#fff" /> 回管理後台</button>
   ) : null;
 
-  // --- 管理員後台（必須在入口畫面之前檢查）---
+  // 管理員後台
   if (view === 'admin' && adminUser) return (
     <AdminPanel
       adminUser={adminUser}
@@ -553,47 +599,51 @@ function AppInner() {
 
   // --- 入口畫面 ---
   if (view === 'entry' || !userData) return (
-    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, overflow: 'hidden', position: 'relative', background: 'linear-gradient(160deg, #0f2922 0%, #134e3a 40%, #1a3a4a 100%)' }}>
-      <div style={{ position: 'absolute', top: '-10%', right: '-5%', width: 400, height: 400, background: 'radial-gradient(circle, rgba(234,179,8,0.12) 0%, transparent 70%)', borderRadius: '50%' }} />
-      <div style={{ position: 'absolute', bottom: '-15%', left: '-10%', width: 300, height: 300, background: 'radial-gradient(circle, rgba(16,185,129,0.15) 0%, transparent 70%)', borderRadius: '50%' }} />
+    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, overflow: 'hidden', position: 'relative', background: 'linear-gradient(160deg, #0f2922 0%, #134e3a 55%, #10303c 100%)' }}>
+      {/* 背景格線（官網感） */}
+      <div style={{ position: 'absolute', inset: 0, opacity: 0.06, backgroundImage: 'linear-gradient(rgba(167,215,195,0.5) 1px, transparent 1px), linear-gradient(90deg, rgba(167,215,195,0.5) 1px, transparent 1px)', backgroundSize: '48px 48px' }} />
+      <div style={{ position: 'absolute', top: '-10%', right: '-5%', width: 400, height: 400, background: 'radial-gradient(circle, rgba(234,179,8,0.1) 0%, transparent 70%)', borderRadius: '50%' }} />
+
       <div style={{ maxWidth: 380, width: '100%', position: 'relative', zIndex: 10, animation: 'fadeSlideUp 0.7s cubic-bezier(0.16,1,0.3,1) both' }}>
-        <div style={{ textAlign: 'center', marginBottom: 32 }}>
-          <div style={{ width: 72, height: 72, margin: '0 auto 16px', background: 'linear-gradient(135deg, #fbbf24, #f59e0b)', borderRadius: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 36, boxShadow: '0 8px 32px rgba(245,158,11,0.25)', transform: 'rotate(3deg)' }}>🐉</div>
-          <h1 style={{ fontFamily: '"Noto Serif TC", Georgia, serif', fontSize: 28, fontWeight: 900, color: '#fff', letterSpacing: 2 }}>端午盛夏慶典</h1>
-          <p style={{ fontSize: 11, fontWeight: 600, color: 'rgba(167,215,195,0.6)', letterSpacing: 4, textTransform: 'uppercase', marginTop: 4 }}>Dragon Boat Festival</p>
+        <div style={{ textAlign: 'center', marginBottom: 30 }}>
+          <div style={{ width: 74, height: 74, margin: '0 auto 16px', background: 'linear-gradient(135deg, #fbbf24, #d97706)', clipPath: CUT(14), display: 'flex', alignItems: 'center', justifyContent: 'center', transform: 'rotate(2deg)' }}>
+            <Icon name="boat" size={40} color="#123f30" sw={1.9} />
+          </div>
+          <h1 style={{ fontFamily: '"Noto Serif TC", Georgia, serif', fontSize: 28, fontWeight: 900, color: '#fff', letterSpacing: 4 }}>端午盛夏慶典</h1>
+          <p style={{ fontSize: 10, fontWeight: 600, color: 'rgba(167,215,195,0.55)', letterSpacing: 5, textTransform: 'uppercase', marginTop: 6 }}>— Dragon Boat Festival —</p>
         </div>
 
-        <div style={{ background: 'rgba(255,255,255,0.06)', backdropFilter: 'blur(24px)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 28, padding: '28px 24px', boxShadow: '0 24px 64px rgba(0,0,0,0.3)' }}>
-          <div style={{ display: 'flex', background: 'rgba(0,0,0,0.2)', borderRadius: 14, padding: 3, marginBottom: 20 }}>
+        <div style={{ position: 'relative', background: 'rgba(255,255,255,0.06)', backdropFilter: 'blur(24px)', border: '1px solid rgba(167,215,195,0.22)', clipPath: CUT(16), padding: '28px 24px' }}>
+          <Corners color="rgba(167,215,195,0.6)" size={12} inset={4} />
+          <div style={{ display: 'flex', background: 'rgba(0,0,0,0.25)', clipPath: CUT(8), padding: 3, marginBottom: 20 }}>
             {['新玩家登記', '讀取舊檔'].map((label, i) => {
               const active = i === (isLoginMode ? 1 : 0);
-              return (<button key={i} onClick={() => setIsLoginMode(i === 1)} style={{ flex: 1, padding: '10px 0', borderRadius: 12, fontSize: 13, fontWeight: 700, border: 'none', cursor: 'pointer', transition: 'all 0.3s', background: active ? 'rgba(255,255,255,0.95)' : 'transparent', color: active ? '#134e3a' : 'rgba(167,215,195,0.5)', boxShadow: active ? '0 2px 8px rgba(0,0,0,0.15)' : 'none' }}>{label}</button>);
+              return (<button key={i} onClick={() => setIsLoginMode(i === 1)} style={{ flex: 1, padding: '10px 0', clipPath: CUT(6), fontSize: 13, fontWeight: 700, border: 'none', cursor: 'pointer', transition: 'all 0.3s', background: active ? 'rgba(255,255,255,0.95)' : 'transparent', color: active ? '#134e3a' : 'rgba(167,215,195,0.5)' }}>{label}</button>);
             })}
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             <div>
-              <label style={{ fontSize: 10, fontWeight: 700, color: 'rgba(167,215,195,0.7)', marginLeft: 4, letterSpacing: 1 }}>角色暱稱</label>
+              <label style={{ fontSize: 10, fontWeight: 700, color: 'rgba(167,215,195,0.7)', marginLeft: 4, letterSpacing: 2 }}>角色暱稱</label>
               <input type="text" maxLength={12} value={inputName} onChange={e => setInputName(e.target.value)} placeholder="請輸入暱稱"
-                style={{ width: '100%', boxSizing: 'border-box', marginTop: 4, padding: '14px 16px', background: 'rgba(0,20,15,0.4)', border: '1px solid rgba(16,185,129,0.2)', borderRadius: 16, color: '#fff', fontSize: 14, outline: 'none', fontFamily: 'inherit' }} />
+                style={{ width: '100%', boxSizing: 'border-box', marginTop: 4, padding: '14px 16px', background: 'rgba(0,20,15,0.45)', border: '1px solid rgba(16,185,129,0.25)', clipPath: CUT(8), color: '#fff', fontSize: 14, outline: 'none', fontFamily: 'inherit' }} />
             </div>
             <div>
-              <label style={{ fontSize: 10, fontWeight: 700, color: 'rgba(167,215,195,0.7)', marginLeft: 4, letterSpacing: 1 }}>通行密碼</label>
+              <label style={{ fontSize: 10, fontWeight: 700, color: 'rgba(167,215,195,0.7)', marginLeft: 4, letterSpacing: 2 }}>通行密碼</label>
               <input type="password" maxLength={8} value={inputPin} onChange={e => setInputPin(e.target.value)} placeholder={isLoginMode ? '輸入密碼' : '設定4位數以上密碼'}
-                style={{ width: '100%', boxSizing: 'border-box', marginTop: 4, padding: '14px 16px', background: 'rgba(0,20,15,0.4)', border: '1px solid rgba(16,185,129,0.2)', borderRadius: 16, color: '#fff', fontSize: 14, outline: 'none', fontFamily: 'inherit', letterSpacing: 4 }} />
+                style={{ width: '100%', boxSizing: 'border-box', marginTop: 4, padding: '14px 16px', background: 'rgba(0,20,15,0.45)', border: '1px solid rgba(16,185,129,0.25)', clipPath: CUT(8), color: '#fff', fontSize: 14, outline: 'none', fontFamily: 'inherit', letterSpacing: 4 }} />
             </div>
           </div>
 
           <button onClick={isLoginMode ? handleLogin : handleRegister} disabled={loading}
-            style={{ width: '100%', marginTop: 20, padding: '16px 0', background: loading ? '#94a3b8' : 'linear-gradient(135deg, #fbbf24, #f59e0b)', color: '#134e3a', fontSize: 16, fontWeight: 900, border: 'none', borderRadius: 16, cursor: loading ? 'wait' : 'pointer', boxShadow: '0 4px 20px rgba(245,158,11,0.3)', letterSpacing: 1 }}>
+            style={{ width: '100%', marginTop: 20, padding: '16px 0', background: loading ? '#94a3b8' : 'linear-gradient(135deg, #fbbf24, #f59e0b)', color: '#134e3a', fontSize: 15, fontWeight: 900, border: 'none', clipPath: CUT(10), cursor: loading ? 'wait' : 'pointer', letterSpacing: 2 }}>
             {loading ? '處理中...' : isLoginMode ? '登入慶典 →' : '開始冒險 →'}
           </button>
 
-          <button onClick={handleDemoLogin} style={{ width: '100%', marginTop: 10, padding: '14px 0', background: 'rgba(16,185,129,0.12)', color: 'rgba(167,215,195,0.8)', fontSize: 13, fontWeight: 700, border: '1px solid rgba(16,185,129,0.2)', borderRadius: 16, cursor: 'pointer' }}>
-            ⚡ 快速試玩 (Demo)
+          <button onClick={handleDemoLogin} style={{ width: '100%', marginTop: 10, padding: '13px 0', background: 'rgba(16,185,129,0.12)', color: 'rgba(167,215,195,0.85)', fontSize: 13, fontWeight: 700, border: '1px solid rgba(16,185,129,0.25)', clipPath: CUT(10), cursor: 'pointer' }}>
+            快速試玩（Demo）
           </button>
 
-          {/* 管理員入口 */}
           <button onClick={() => {
             signInWithPopup(auth, googleProvider).then((result) => {
               if (result.user && result.user.uid === ADMIN_UID) { setAdminUser(result.user); setView('admin'); }
@@ -602,11 +652,10 @@ function AppInner() {
               console.error('Admin login error:', err);
               alert('登入錯誤: ' + err.code + ' - ' + err.message);
             });
-          }} style={{ width: '100%', marginTop: 8, padding: '10px 0', background: 'transparent', color: 'rgba(167,215,195,0.3)', fontSize: 10, fontWeight: 700, border: '1px solid rgba(255,255,255,0.05)', borderRadius: 12, cursor: 'pointer', letterSpacing: 1 }}>
-            🔐 管理員入口
+          }} style={{ width: '100%', marginTop: 8, padding: '10px 0', background: 'transparent', color: 'rgba(167,215,195,0.35)', fontSize: 10, fontWeight: 700, border: '1px solid rgba(255,255,255,0.06)', clipPath: CUT(6), cursor: 'pointer', letterSpacing: 2, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+            <Icon name="lock" size={11} /> 管理員入口
           </button>
         </div>
-        {userData?.isDemo && <p style={{ textAlign: 'center', color: 'rgba(255,255,255,0.3)', fontSize: 10, marginTop: 12 }}>試玩模式的資料不會儲存到雲端</p>}
       </div>
 
       <style>{`
@@ -622,30 +671,34 @@ function AppInner() {
   // 主畫面
   // ============================================================
   return (
-    <div style={{ minHeight: '100vh', background: '#f8f7f4', fontFamily: '"Noto Sans TC",-apple-system,sans-serif', paddingBottom: 88, overflow: 'hidden' }}>
+    <div style={{ minHeight: '100vh', background: C.cream, fontFamily: '"Noto Sans TC",-apple-system,sans-serif', paddingBottom: 88, overflow: 'hidden', color: C.ink }}>
       {adminFloatingBtn}
       {/* Header */}
-      <header style={{ position: 'sticky', top: 0, zIndex: 40, background: 'rgba(255,255,255,0.92)', backdropFilter: 'blur(20px)', borderBottom: '1px solid rgba(0,0,0,0.06)', padding: '12px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <header style={{ position: 'sticky', top: 0, zIndex: 40, background: 'rgba(253,252,246,0.92)', backdropFilter: 'blur(20px)', borderBottom: `1px solid ${C.line}`, padding: '12px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <div style={{ width: 40, height: 40, background: 'linear-gradient(135deg, #0d9488, #065f46)', borderRadius: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20 }}>🐉</div>
+          <div style={{ width: 40, height: 40, background: `linear-gradient(135deg, ${C.teal}, ${C.ink})`, clipPath: CUT(9), display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Icon name="boat" size={22} color="#fff" />
+          </div>
           <div>
-            <h1 style={{ fontSize: 16, fontWeight: 900, lineHeight: 1.1, fontFamily: '"Noto Serif TC", serif', letterSpacing: 1 }}>河道慶典街</h1>
-            <p style={{ fontSize: 9, fontWeight: 700, color: '#0d9488', letterSpacing: 2, textTransform: 'uppercase', marginTop: 2 }}>{userData.username} {userData.isDemo ? '(試玩)' : ''}</p>
+            <h1 style={{ fontSize: 16, fontWeight: 900, lineHeight: 1.1, fontFamily: '"Noto Serif TC", serif', letterSpacing: 2 }}>河道慶典街</h1>
+            <p style={{ fontSize: 9, fontWeight: 700, color: C.teal, letterSpacing: 2, textTransform: 'uppercase', marginTop: 2 }}>{userData.username} {userData.isDemo ? '(試玩)' : ''}</p>
           </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'linear-gradient(135deg, #fef3c7, #fde68a)', padding: '8px 16px', borderRadius: 20, border: '1px solid rgba(245,158,11,0.2)' }}>
-            <span style={{ fontSize: 14 }}>🪙</span>
-            <span style={{ fontWeight: 900, color: '#92400e', fontSize: 14, fontFamily: 'monospace' }}>{userData.coins}</span>
+          <div style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 6, background: C.goldBg, padding: '8px 14px', clipPath: CUT(8), border: `1px solid rgba(183,121,31,0.35)` }}>
+            <Icon name="coin" size={15} color={C.gold} />
+            <span style={{ fontWeight: 900, color: '#8a5a12', fontSize: 14, fontFamily: 'monospace' }}>{userData.coins}</span>
           </div>
-          <button onClick={handleLogout} style={{ width: 36, height: 36, borderRadius: 12, border: '1px solid rgba(0,0,0,0.08)', background: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14 }} title="登出">↗</button>
+          <button onClick={handleLogout} title="登出" style={{ width: 36, height: 36, clipPath: CUT(8), border: `1px solid ${C.line}`, background: C.paper, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Icon name="logout" size={16} color={C.ink} />
+          </button>
         </div>
       </header>
 
       {/* Toast */}
       {message && (
-        <div style={{ position: 'fixed', top: 80, left: '50%', transform: 'translateX(-50%)', zIndex: 100, background: message.type === 'success' ? '#065f46' : message.type === 'warn' ? '#92400e' : '#1e293b', color: '#fff', padding: '12px 24px', borderRadius: 16, fontSize: 12, fontWeight: 700, boxShadow: '0 8px 32px rgba(0,0,0,0.2)', animation: 'fadeSlideDown 0.3s ease-out', display: 'flex', alignItems: 'center', gap: 8, maxWidth: '90vw' }}>
-          <span>{message.type === 'success' ? '✓' : message.type === 'warn' ? '⚠' : 'ℹ'}</span> {message.text}
+        <div style={{ position: 'fixed', top: 80, left: '50%', transform: 'translateX(-50%)', zIndex: 100, background: message.type === 'success' ? '#0f3d2e' : message.type === 'warn' ? '#7c3a12' : '#1e293b', color: '#fff', padding: '12px 22px', clipPath: CUT(10), fontSize: 12, fontWeight: 700, animation: 'fadeSlideDown 0.3s ease-out', display: 'flex', alignItems: 'center', gap: 8, maxWidth: '90vw' }}>
+          <Icon name={message.type === 'success' ? 'check' : 'spark'} size={13} color="#fff" /> {message.text}
         </div>
       )}
 
@@ -653,55 +706,47 @@ function AppInner() {
       {stampReveal && (
         <div onClick={() => setStampReveal(null)} style={{
           position: 'fixed', inset: 0, zIndex: 250,
-          background: 'rgba(15,41,34,0.75)', backdropFilter: 'blur(10px)',
+          background: 'rgba(15,41,34,0.78)', backdropFilter: 'blur(10px)',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           cursor: 'pointer', animation: 'fadeIn 0.25s ease-out', padding: 24
         }}>
           <div onClick={e => e.stopPropagation()} style={{
             position: 'relative', width: '100%', maxWidth: 320,
-            background: 'linear-gradient(160deg, #ffffff, #fffbeb)',
-            borderRadius: 28, padding: '36px 28px 28px',
-            boxShadow: '0 24px 80px rgba(0,0,0,0.35)',
+            background: `linear-gradient(165deg, ${C.paper}, #fbf5e4)`,
+            clipPath: CUT(18), padding: '34px 26px 26px',
             textAlign: 'center', cursor: 'default',
             animation: 'stampCardIn 0.5s cubic-bezier(0.16,1,0.3,1)', overflow: 'hidden'
           }}>
-            {/* 頂部緞帶 */}
-            <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 6, background: 'linear-gradient(90deg, #fbbf24, #f59e0b, #fbbf24)' }} />
-            {/* 漂浮慶祝粒子 */}
-            {['✨', '🎉', '⭐', '🎊'].map((icon, i) => (
-              <span key={i} style={{ position: 'absolute', fontSize: 16, top: `${15 + (i % 2) * 8}%`, left: `${12 + i * 24}%`, animation: `stampCelebrate 2s ease-in-out ${i * 0.25}s infinite`, opacity: 0.6, pointerEvents: 'none' }}>{icon}</span>
+            <Corners color={C.gold} size={14} inset={6} />
+            <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 4, background: `linear-gradient(90deg, transparent, ${C.gold}, transparent)` }} />
+            {[0, 1, 2, 3].map(i => (
+              <span key={i} style={{ position: 'absolute', top: `${14 + (i % 2) * 8}%`, left: `${12 + i * 24}%`, animation: `stampCelebrate 2s ease-in-out ${i * 0.25}s infinite`, opacity: 0.55, pointerEvents: 'none' }}>
+                <Icon name={i % 2 ? 'spark' : 'stamp'} size={15} color={C.gold} />
+              </span>
             ))}
 
-            <p style={{ fontSize: 11, fontWeight: 800, color: '#f59e0b', letterSpacing: 3, textTransform: 'uppercase', marginBottom: 4, position: 'relative', zIndex: 2 }}>集章成功</p>
-            <p style={{ fontSize: 13, fontWeight: 700, color: '#92400e', marginBottom: 20, position: 'relative', zIndex: 2 }}>獲得新印章！</p>
+            <p style={{ fontSize: 10, fontWeight: 800, color: C.gold, letterSpacing: 4, textTransform: 'uppercase', marginBottom: 4, position: 'relative', zIndex: 2 }}>STAMP GET</p>
+            <p style={{ fontSize: 15, fontWeight: 900, color: '#8a5a12', marginBottom: 20, position: 'relative', zIndex: 2, fontFamily: '"Noto Serif TC", serif', letterSpacing: 2 }}>集章成功・獲得新印章</p>
 
-            {/* 印章圖放大 - 蓋章動畫 */}
             <div style={{ display: 'inline-block', marginBottom: 18, animation: 'stampPress 0.6s cubic-bezier(0.34,1.56,0.64,1) 0.2s both', position: 'relative', zIndex: 2 }}>
               <StampDesign stamp={stampReveal.stamp} size={140} stamped={true} boothEmoji={stampReveal.boothEmoji} />
             </div>
 
-            {/* 攤位名稱 */}
-            <div style={{ background: 'rgba(13,148,136,0.08)', borderRadius: 14, padding: '10px 16px', marginBottom: 12, position: 'relative', zIndex: 2 }}>
-              <p style={{ fontSize: 9, fontWeight: 700, color: '#0d9488', letterSpacing: 1, marginBottom: 2 }}>來自攤位</p>
-              <p style={{ fontSize: 16, fontWeight: 900, color: '#134e3a', fontFamily: '"Noto Serif TC", serif' }}>{stampReveal.boothEmoji} {stampReveal.boothName}</p>
+            <div style={{ position: 'relative', background: 'rgba(13,148,136,0.07)', clipPath: CUT(8), border: `1px solid ${C.tealDim}`, padding: '10px 16px', marginBottom: 12, zIndex: 2 }}>
+              <p style={{ fontSize: 9, fontWeight: 700, color: C.teal, letterSpacing: 2, marginBottom: 2 }}>來自攤位</p>
+              <p style={{ fontSize: 16, fontWeight: 900, color: C.ink, fontFamily: '"Noto Serif TC", serif' }}>{stampReveal.boothName}</p>
             </div>
 
-            {/* 獎勵 */}
-            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'linear-gradient(135deg, #fef3c7, #fde68a)', padding: '8px 18px', borderRadius: 20, marginBottom: 20, border: '1px solid rgba(245,158,11,0.25)', position: 'relative', zIndex: 2 }}>
-              <span style={{ fontSize: 16 }}>🪙</span>
-              <span style={{ fontSize: 15, fontWeight: 900, color: '#92400e', fontFamily: 'monospace' }}>+{stampReveal.reward}</span>
-              <span style={{ fontSize: 11, fontWeight: 700, color: '#a16207' }}>購物金</span>
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: C.goldBg, padding: '8px 18px', clipPath: CUT(8), marginBottom: 20, border: '1px solid rgba(183,121,31,0.3)', position: 'relative', zIndex: 2 }}>
+              <Icon name="coin" size={15} color={C.gold} />
+              <span style={{ fontSize: 15, fontWeight: 900, color: '#8a5a12', fontFamily: 'monospace' }}>+{stampReveal.reward}</span>
+              <span style={{ fontSize: 11, fontWeight: 700, color: '#8a5a12' }}>購物金</span>
             </div>
 
-            <button onClick={() => setStampReveal(null)} style={{ width: '100%', padding: '14px 0', background: 'linear-gradient(135deg, #0d9488, #065f46)', color: '#fff', fontSize: 14, fontWeight: 900, border: 'none', borderRadius: 16, cursor: 'pointer', letterSpacing: 1, position: 'relative', zIndex: 2 }}>
+            <button onClick={() => setStampReveal(null)} style={{ width: '100%', padding: '14px 0', background: `linear-gradient(135deg, ${C.teal}, ${C.ink})`, color: '#fff', fontSize: 14, fontWeight: 900, border: 'none', clipPath: CUT(10), cursor: 'pointer', letterSpacing: 2, position: 'relative', zIndex: 2 }}>
               收下印章 ✓
             </button>
           </div>
-          <style>{`
-            @keyframes stampCardIn { 0%{opacity:0;transform:translateY(30px) scale(0.9)} 100%{opacity:1;transform:translateY(0) scale(1)} }
-            @keyframes stampPress { 0%{transform:scale(2.2) rotate(-12deg);opacity:0} 60%{transform:scale(0.92) rotate(4deg);opacity:1} 100%{transform:scale(1) rotate(0deg)} }
-            @keyframes stampCelebrate { 0%,100%{transform:translateY(0) rotate(0deg)} 50%{transform:translateY(-12px) rotate(12deg)} }
-          `}</style>
         </div>
       )}
 
@@ -709,26 +754,18 @@ function AppInner() {
       {zoomFlagUrl && (
         <div onClick={() => setZoomFlagUrl(null)} style={{
           position: 'fixed', inset: 0, zIndex: 200,
-          background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(8px)',
+          background: 'rgba(10,25,20,0.75)', backdropFilter: 'blur(8px)',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           cursor: 'pointer', animation: 'fadeIn 0.2s ease-out'
         }}>
           <div style={{ position: 'relative', animation: 'zoomIn 0.3s cubic-bezier(0.16,1,0.3,1)' }} onClick={e => e.stopPropagation()}>
             <img src={zoomFlagUrl} alt="隊伍旗幟"
-              style={{
-                maxWidth: '85vw', maxHeight: '75vh', borderRadius: 16,
-                boxShadow: '0 24px 80px rgba(0,0,0,0.4)',
-                border: '4px solid rgba(255,255,255,0.2)',
-                objectFit: 'contain', background: '#fff'
-              }}
-            />
+              style={{ maxWidth: '85vw', maxHeight: '75vh', clipPath: CUT(14), border: '2px solid rgba(255,255,255,0.25)', objectFit: 'contain', background: '#fff' }} />
             <button onClick={() => setZoomFlagUrl(null)} style={{
-              position: 'absolute', top: -12, right: -12,
-              width: 32, height: 32, borderRadius: '50%',
-              background: 'rgba(0,0,0,0.7)', color: '#fff', border: '2px solid rgba(255,255,255,0.3)',
-              fontSize: 14, fontWeight: 900, cursor: 'pointer',
-              display: 'flex', alignItems: 'center', justifyContent: 'center'
-            }}>✕</button>
+              position: 'absolute', top: -12, right: -12, width: 32, height: 32, borderRadius: '50%',
+              background: 'rgba(0,0,0,0.75)', color: '#fff', border: '2px solid rgba(255,255,255,0.3)',
+              cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center'
+            }}><Icon name="close" size={13} color="#fff" /></button>
           </div>
         </div>
       )}
@@ -737,35 +774,33 @@ function AppInner() {
         {/* HOME */}
         {view === 'home' && (
           <div style={{ height: '100%', display: 'flex', flexDirection: 'column', position: 'relative', overflow: 'hidden' }}>
-            <div style={{ position: 'absolute', inset: 0, opacity: 0.03, backgroundImage: 'radial-gradient(#0d9488 1px, transparent 1px)', backgroundSize: '32px 32px', pointerEvents: 'none', zIndex: 0 }} />
+            <div style={{ position: 'absolute', inset: 0, opacity: 0.05, backgroundImage: `linear-gradient(${C.tealDim} 1px, transparent 1px), linear-gradient(90deg, ${C.tealDim} 1px, transparent 1px)`, backgroundSize: '40px 40px', pointerEvents: 'none', zIndex: 0 }} />
 
-            {/* 上排攤位 - 緊湊膠囊列 */}
             {boothsLoading ? (
               <div style={{ flexShrink: 0, padding: '12px', display: 'flex', gap: 10, justifyContent: 'center' }}>
                 {[0, 1, 2].map(i => (
-                  <div key={i} style={{ width: 100, height: 100, borderRadius: 20, background: 'linear-gradient(90deg, #f1f5f9 25%, #e2e8f0 50%, #f1f5f9 75%)', backgroundSize: '200% 100%', animation: 'shimmer 1.5s infinite' }} />
+                  <div key={i} style={{ width: 100, height: 100, clipPath: CUT(12), background: 'linear-gradient(90deg, #ece8d9 25%, #e3ddc9 50%, #ece8d9 75%)', backgroundSize: '200% 100%', animation: 'shimmer 1.5s infinite' }} />
                 ))}
               </div>
             ) : booths.length === 0 ? (
               <div style={{ flexShrink: 0, padding: '20px 12px', textAlign: 'center' }}>
-                <span style={{ fontSize: 28 }}>🏮</span>
-                <p style={{ fontSize: 12, fontWeight: 800, color: '#0d9488', marginTop: 4 }}>攤位籌備中</p>
+                <Icon name="lantern" size={30} color={C.teal} style={{ margin: '0 auto' }} />
+                <p style={{ fontSize: 12, fontWeight: 800, color: C.teal, marginTop: 6 }}>攤位籌備中</p>
                 <p style={{ fontSize: 10, color: '#94a3b8', marginTop: 2 }}>攤主們正在報名，敬請期待！</p>
               </div>
             ) : (
               <BoothPillRow booths={booths.filter(b => b.side === 'top')} stamps={userData.stamps} onOpen={openBooth} side="top" />
             )}
 
-            {/* ★ 河道賽況 - 絕對主角，佔滿剩餘空間 */}
+            {/* 河道賽況 */}
             <div style={{ flex: 1, minHeight: 0, zIndex: 5, position: 'relative', display: 'flex', flexDirection: 'column' }}>
-              <WaveDivider color="#0d9488" />
+              <TechDivider />
               <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
                 <RiverRaceTracker teams={userData.isDemo && raceTeams.length === 0 ? MOCK_RACE_TEAMS : raceTeams} onFlagClick={setZoomFlagUrl} isDemo={userData.isDemo} loading={raceLoading && !userData.isDemo} />
               </div>
-              <WaveDivider flip color="#0d9488" />
+              <TechDivider flip />
             </div>
 
-            {/* 下排攤位 - 緊湊膠囊列 */}
             {!boothsLoading && booths.length > 0 && (
               <BoothPillRow booths={booths.filter(b => b.side === 'bottom')} stamps={userData.stamps} onOpen={openBooth} side="bottom" />
             )}
@@ -774,226 +809,169 @@ function AppInner() {
 
         {/* BOOTH DETAIL */}
         {view === 'booth' && selectedBooth && (
-          <div style={{ height: '100%', overflowY: 'auto', background: '#fff', animation: 'slideUp 0.45s cubic-bezier(0.16,1,0.3,1)' }}>
-            <div style={{ position: 'relative', height: 200, background: 'linear-gradient(135deg, #065f46, #134e3a)', display: 'flex', alignItems: 'flex-end', padding: 28, overflow: 'hidden' }}>
-              {selectedBooth.facadeImageUrl && <img src={selectedBooth.facadeImageUrl} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', opacity: 0.4 }} />}
-              <div style={{ position: 'absolute', top: 0, right: 0, width: 200, height: 200, background: 'radial-gradient(circle, rgba(251,191,36,0.15) 0%, transparent 70%)' }} />
-              <div style={{ fontSize: 64, position: 'absolute', top: 20, right: 28, opacity: 0.2 }}>{selectedBooth.emoji}</div>
-              <button onClick={closeBooth} style={{ position: 'absolute', top: 20, left: 20, width: 44, height: 44, borderRadius: 14, background: 'rgba(255,255,255,0.15)', backdropFilter: 'blur(10px)', border: '1px solid rgba(255,255,255,0.2)', color: '#fff', fontSize: 20, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>←</button>
+          <div style={{ height: '100%', overflowY: 'auto', background: C.paper, animation: 'slideUp 0.45s cubic-bezier(0.16,1,0.3,1)' }}>
+            <div style={{ position: 'relative', height: 200, background: `linear-gradient(135deg, ${C.ink}, #0f2922)`, display: 'flex', alignItems: 'flex-end', padding: 28, overflow: 'hidden' }}>
+              {selectedBooth.facadeImageUrl && <img src={selectedBooth.facadeImageUrl} alt="" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', opacity: 0.35 }} />}
+              <div style={{ position: 'absolute', inset: 0, opacity: 0.08, backgroundImage: 'linear-gradient(rgba(255,255,255,0.6) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.6) 1px, transparent 1px)', backgroundSize: '36px 36px' }} />
+              <button onClick={closeBooth} style={{ position: 'absolute', top: 20, left: 20, width: 44, height: 44, clipPath: CUT(10), background: 'rgba(255,255,255,0.14)', backdropFilter: 'blur(10px)', border: '1px solid rgba(255,255,255,0.25)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 3 }}>
+                <Icon name="chevL" size={20} color="#fff" />
+              </button>
+              <div style={{ position: 'absolute', top: 20, right: 24, zIndex: 3 }}><HexTag bg="rgba(255,255,255,0.12)" color="#fff">攤</HexTag></div>
               <div style={{ position: 'relative', zIndex: 2 }}>
-                <p style={{ fontSize: 11, fontWeight: 700, color: 'rgba(255,255,255,0.5)', letterSpacing: 2, textTransform: 'uppercase', marginBottom: 4 }}>攤位</p>
-                <h2 style={{ fontSize: 28, fontWeight: 900, color: '#fff', fontFamily: '"Noto Serif TC", serif' }}>{selectedBooth.name}</h2>
+                <p style={{ fontSize: 10, fontWeight: 700, color: 'rgba(255,255,255,0.55)', letterSpacing: 3, textTransform: 'uppercase', marginBottom: 4 }}>BOOTH / 攤位</p>
+                <h2 style={{ fontSize: 27, fontWeight: 900, color: '#fff', fontFamily: '"Noto Serif TC", serif', letterSpacing: 1 }}>{selectedBooth.emoji ? selectedBooth.emoji + ' ' : ''}{selectedBooth.name}</h2>
               </div>
             </div>
 
             <div style={{ maxWidth: 600, margin: '0 auto', padding: '28px 24px' }}>
-              <p style={{ fontSize: 14, lineHeight: 1.8, color: '#64748b', marginBottom: 24 }}>{selectedBooth.description}</p>
+              <p style={{ fontSize: 14, lineHeight: 1.9, color: '#4b5f56', marginBottom: 24 }}>{selectedBooth.description}</p>
 
               {/* 攤位即時統計 */}
               {selectedBooth.stats && (
                 <div style={{ marginBottom: 20 }}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, paddingLeft: 4 }}>
-                    <span style={{ fontSize: 10, fontWeight: 800, color: '#94a3b8', letterSpacing: 2, textTransform: 'uppercase' }}>即時統計</span>
+                    <span style={{ fontSize: 10, fontWeight: 800, color: '#8a9a90', letterSpacing: 3, textTransform: 'uppercase' }}>／ 即時統計</span>
                     <button onClick={refreshBooths} disabled={refreshing} style={{
-                      display: 'flex', alignItems: 'center', gap: 4,
-                      padding: '4px 10px', borderRadius: 8,
-                      background: refreshing ? '#f1f5f9' : '#fff',
-                      border: '1px solid rgba(0,0,0,0.08)',
-                      fontSize: 10, fontWeight: 700, color: '#64748b',
-                      cursor: refreshing ? 'wait' : 'pointer',
-                      transition: 'all 0.2s'
+                      display: 'flex', alignItems: 'center', gap: 5, padding: '4px 10px', clipPath: CUT(6),
+                      background: refreshing ? '#eee9da' : C.paper, border: `1px solid ${C.line}`,
+                      fontSize: 10, fontWeight: 700, color: '#4b5f56', cursor: refreshing ? 'wait' : 'pointer',
                     }}>
-                      <span style={{ display: 'inline-block', transition: 'transform 0.6s', transform: refreshing ? 'rotate(360deg)' : 'rotate(0deg)' }}>🔄</span>
+                      <span style={{ display: 'inline-block', transition: 'transform 0.6s', transform: refreshing ? 'rotate(360deg)' : 'rotate(0deg)' }}><Icon name="refresh" size={11} /></span>
                       {refreshing ? '更新中' : '刷新'}
                     </button>
                   </div>
                   <div style={{ display: 'flex', gap: 8 }}>
-                    <div style={{ flex: 1, padding: '14px 8px', background: 'linear-gradient(135deg, #fef3c7, #fef9c3)', borderRadius: 16, textAlign: 'center', border: '1px solid rgba(251,191,36,0.25)' }}>
-                      <div style={{ fontSize: 18 }}>🏆</div>
-                      <div style={{ fontSize: 20, fontWeight: 900, color: '#92400e', fontFamily: 'monospace', lineHeight: 1.2, marginTop: 2 }}>
-                        {selectedBooth.stats.stampCount}
+                    {[
+                      { icon: 'stamp', val: selectedBooth.stats.stampCount, label: '集章人次', col: C.gold, bg: C.goldBg, bd: 'rgba(183,121,31,0.3)' },
+                      { icon: 'bag', val: selectedBooth.stats.salesCount, label: '銷售件數', col: '#1d4ed8', bg: '#e4edfb', bd: 'rgba(29,78,216,0.25)' },
+                      { icon: 'coin', val: '$' + selectedBooth.stats.salesRevenue, label: '銷售總額', col: '#0f766e', bg: '#e2f3ef', bd: 'rgba(15,118,110,0.25)' },
+                    ].map((s, i) => (
+                      <div key={i} style={{ position: 'relative', flex: 1, padding: '14px 8px', background: s.bg, clipPath: CUT(10), textAlign: 'center', border: `1px solid ${s.bd}` }}>
+                        <Icon name={s.icon} size={17} color={s.col} style={{ margin: '0 auto' }} />
+                        <div style={{ fontSize: 19, fontWeight: 900, color: s.col, fontFamily: 'monospace', lineHeight: 1.2, marginTop: 4 }}>{s.val}</div>
+                        <div style={{ fontSize: 9, fontWeight: 700, color: s.col, letterSpacing: 1, marginTop: 2, opacity: 0.8 }}>{s.label}</div>
                       </div>
-                      <div style={{ fontSize: 9, fontWeight: 700, color: '#a16207', letterSpacing: 1, marginTop: 2 }}>集章人次</div>
-                    </div>
-                    <div style={{ flex: 1, padding: '14px 8px', background: 'linear-gradient(135deg, #dbeafe, #e0f2fe)', borderRadius: 16, textAlign: 'center', border: '1px solid rgba(59,130,246,0.2)' }}>
-                      <div style={{ fontSize: 18 }}>🛍️</div>
-                      <div style={{ fontSize: 20, fontWeight: 900, color: '#1e40af', fontFamily: 'monospace', lineHeight: 1.2, marginTop: 2 }}>
-                        {selectedBooth.stats.salesCount}
-                      </div>
-                      <div style={{ fontSize: 9, fontWeight: 700, color: '#1d4ed8', letterSpacing: 1, marginTop: 2 }}>銷售件數</div>
-                    </div>
-                    <div style={{ flex: 1, padding: '14px 8px', background: 'linear-gradient(135deg, #d1fae5, #ecfdf5)', borderRadius: 16, textAlign: 'center', border: '1px solid rgba(16,185,129,0.2)' }}>
-                      <div style={{ fontSize: 18 }}>💰</div>
-                      <div style={{ fontSize: 20, fontWeight: 900, color: '#065f46', fontFamily: 'monospace', lineHeight: 1.2, marginTop: 2 }}>
-                        ${selectedBooth.stats.salesRevenue}
-                      </div>
-                      <div style={{ fontSize: 9, fontWeight: 700, color: '#047857', letterSpacing: 1, marginTop: 2 }}>銷售總額</div>
-                    </div>
+                    ))}
                   </div>
                 </div>
               )}
 
               <a href={selectedBooth.plurkUrl} target="_blank" rel="noopener noreferrer"
-                style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, width: '100%', padding: '16px 0', background: 'linear-gradient(135deg, #0d9488, #065f46)', color: '#fff', borderRadius: 18, fontWeight: 800, fontSize: 14, textDecoration: 'none', boxShadow: '0 4px 16px rgba(13,148,136,0.25)', letterSpacing: 1 }}>
-                前往噗浪互動 ↗
+                style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, width: '100%', padding: '16px 0', background: `linear-gradient(135deg, ${C.teal}, ${C.ink})`, color: '#fff', clipPath: CUT(10), fontWeight: 800, fontSize: 14, textDecoration: 'none', letterSpacing: 2 }}>
+                前往噗浪互動 <Icon name="external" size={13} color="#fff" />
               </a>
 
-              <div style={{ margin: '24px 0', padding: 20, background: '#f0fdf4', borderRadius: 18, border: '1px solid rgba(13,148,136,0.1)' }}>
-                <p style={{ fontSize: 10, fontWeight: 800, color: '#0d9488', letterSpacing: 2, textTransform: 'uppercase', marginBottom: 6 }}>任務說明</p>
-                <p style={{ fontSize: 13, color: '#334155', lineHeight: 1.7 }}>{selectedBooth.task}</p>
+              <div style={{ position: 'relative', margin: '24px 0', padding: 20, background: 'rgba(13,148,136,0.05)', clipPath: CUT(12), border: `1px solid ${C.tealDim}` }}>
+                <Corners size={9} inset={4} />
+                <p style={{ fontSize: 10, fontWeight: 800, color: C.teal, letterSpacing: 3, textTransform: 'uppercase', marginBottom: 6 }}>／ 集章任務</p>
+                <p style={{ fontSize: 13, color: '#334155', lineHeight: 1.8 }}>{selectedBooth.task}</p>
               </div>
 
               {/* 商品列表 */}
-              <p style={{ fontSize: 10, fontWeight: 800, color: '#94a3b8', letterSpacing: 2, textTransform: 'uppercase', marginBottom: 12, marginTop: 28 }}>商品列表</p>
+              <p style={{ fontSize: 10, fontWeight: 800, color: '#8a9a90', letterSpacing: 3, textTransform: 'uppercase', marginBottom: 12, marginTop: 28 }}>／ 商品列表</p>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                 {(selectedBooth.items || []).map(item => (
-                  <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: 16, padding: 16, background: '#fafaf9', borderRadius: 20, border: '1px solid rgba(0,0,0,0.04)' }}>
-                    <div style={{ width: 56, height: 56, borderRadius: 16, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 28, flexShrink: 0, overflow: 'hidden', background: 'linear-gradient(135deg, #e0f2fe, #f0fdf4)' }}>
-                      {item.imageUrl ? <img src={item.imageUrl} style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={e => { e.target.style.display = 'none'; e.target.parentElement.textContent = selectedBooth.emoji; }} /> : selectedBooth.emoji}
+                  <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: 16, padding: 16, background: C.paper, clipPath: CUT(12), border: `1px solid ${C.line}` }}>
+                    <div style={{ width: 56, height: 56, clipPath: CUT(10), display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 26, flexShrink: 0, overflow: 'hidden', background: 'rgba(13,148,136,0.06)', border: `1px solid ${C.tealDim}` }}>
+                      {item.imageUrl ? <img src={item.imageUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'contain' }} onError={e => { e.target.style.display = 'none'; e.target.parentElement.textContent = selectedBooth.emoji || '·'; }} /> : (selectedBooth.emoji || <Icon name="gift" size={24} color={C.teal} />)}
                     </div>
                     <div style={{ flex: 1 }}>
                       <h4 style={{ fontWeight: 800, fontSize: 14, marginBottom: 2 }}>{item.name}</h4>
-                      <p style={{ fontSize: 11, color: '#94a3b8' }}>{item.description}</p>
+                      <p style={{ fontSize: 11, color: '#8a9a90' }}>{item.description}</p>
                     </div>
                     <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                      <p style={{ fontWeight: 900, color: '#0d9488', fontSize: 16, fontFamily: 'monospace' }}>${item.price}</p>
-                      <button onClick={() => buyItem(selectedBooth, item)} style={{ marginTop: 4, padding: '6px 16px', background: '#fff', border: '1px solid rgba(0,0,0,0.1)', borderRadius: 10, fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>購買</button>
+                      <p style={{ fontWeight: 900, color: C.teal, fontSize: 16, fontFamily: 'monospace' }}>${item.price}</p>
+                      <button onClick={() => buyItem(selectedBooth, item)} style={{ marginTop: 4, padding: '6px 16px', background: C.ink, color: '#fff', border: 'none', clipPath: CUT(6), fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>購買</button>
                     </div>
                   </div>
                 ))}
+                {(selectedBooth.items || []).length === 0 && <p style={{ fontSize: 12, color: '#8a9a90', textAlign: 'center', padding: '12px 0' }}>本攤沒有販售商品，純互動集章</p>}
               </div>
 
               {/* 印章區 */}
-              <div style={{ marginTop: 28, padding: 24, background: '#fafaf9', borderRadius: 24, border: '1px solid rgba(0,0,0,0.04)', textAlign: 'center' }}>
-                <p style={{ fontSize: 10, fontWeight: 800, color: '#94a3b8', letterSpacing: 2, textTransform: 'uppercase', marginBottom: 16 }}>本攤印章</p>
-                <div style={{ display: 'inline-block', transition: 'all 0.6s cubic-bezier(0.16,1,0.3,1)', transform: userData.stamps.includes(selectedBooth.id) ? 'rotate(8deg) scale(1)' : 'rotate(0deg) scale(0.9)', opacity: userData.stamps.includes(selectedBooth.id) ? 1 : 0.35, filter: userData.stamps.includes(selectedBooth.id) ? 'none' : 'grayscale(1)', marginBottom: 16 }}>
+              <div style={{ position: 'relative', marginTop: 28, padding: 24, background: C.paper, clipPath: CUT(14), border: `1px solid ${C.line}`, textAlign: 'center' }}>
+                <Corners size={10} inset={5} color={C.line} />
+                <p style={{ fontSize: 10, fontWeight: 800, color: '#8a9a90', letterSpacing: 3, textTransform: 'uppercase', marginBottom: 16 }}>／ 本攤印章</p>
+                <div style={{ display: 'inline-block', transition: 'all 0.6s cubic-bezier(0.16,1,0.3,1)', transform: userData.stamps.includes(selectedBooth.id) ? 'rotate(6deg) scale(1)' : 'rotate(0deg) scale(0.92)', opacity: userData.stamps.includes(selectedBooth.id) ? 1 : 0.4, filter: userData.stamps.includes(selectedBooth.id) ? 'none' : 'grayscale(1)', marginBottom: 16 }}>
                   <StampDesign stamp={selectedBooth.stamp} size={100} stamped={true} boothEmoji={selectedBooth.emoji} />
                 </div>
                 {selectedBooth.stampHint && (
-                  <p style={{ fontSize: 11, color: '#f59e0b', background: 'rgba(245,158,11,0.08)', border: '1px dashed rgba(245,158,11,0.3)', borderRadius: 12, padding: '10px 14px', marginBottom: 16, lineHeight: 1.8, fontWeight: 600, textAlign: 'left' }}>
-                    💡 {selectedBooth.stampHint}
+                  <p style={{ fontSize: 11, color: '#8a5a12', background: 'rgba(183,121,31,0.07)', border: '1px dashed rgba(183,121,31,0.4)', clipPath: CUT(8), padding: '10px 14px', marginBottom: 16, lineHeight: 1.8, fontWeight: 600, textAlign: 'left' }}>
+                    {selectedBooth.stampHint}
                   </p>
                 )}
                 <button disabled={userData.stamps.includes(selectedBooth.id)} onClick={() => collectStamp(selectedBooth.id)}
-                  style={{ width: '100%', padding: '16px 0', borderRadius: 18, fontSize: 15, fontWeight: 900, border: 'none', cursor: userData.stamps.includes(selectedBooth.id) ? 'default' : 'pointer', background: userData.stamps.includes(selectedBooth.id) ? '#e2e8f0' : 'linear-gradient(135deg, #fbbf24, #f59e0b)', color: userData.stamps.includes(selectedBooth.id) ? '#94a3b8' : '#451a03', boxShadow: userData.stamps.includes(selectedBooth.id) ? 'none' : '0 4px 20px rgba(245,158,11,0.3)', letterSpacing: 1 }}>
-                  {userData.stamps.includes(selectedBooth.id) ? '✓ 已集章' : '🏆 領取印章與金幣'}
+                  style={{ width: '100%', padding: '16px 0', clipPath: CUT(10), fontSize: 15, fontWeight: 900, border: 'none', cursor: userData.stamps.includes(selectedBooth.id) ? 'default' : 'pointer', background: userData.stamps.includes(selectedBooth.id) ? '#e8e3d4' : 'linear-gradient(135deg, #fbbf24, #d97706)', color: userData.stamps.includes(selectedBooth.id) ? '#a3a091' : '#451a03', letterSpacing: 2, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+                  <Icon name={userData.stamps.includes(selectedBooth.id) ? 'check' : 'stamp'} size={16} />
+                  {userData.stamps.includes(selectedBooth.id) ? '已集章' : '領取印章與金幣'}
                 </button>
               </div>
 
-              {/* 集章名單 */}
               <CollectorsList collectors={collectors} currentUser={userData.username} isStamped={userData.stamps.includes(selectedBooth.id)} />
             </div>
           </div>
         )}
 
-        {/* INVENTORY */}
+        {/* INVENTORY：物理購物袋 */}
         {view === 'inventory' && (
-          <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24, animation: 'fadeSlideUp 0.5s ease-out' }}>
-            <div style={{ width: '100%', maxWidth: 420, height: '85%', background: 'linear-gradient(180deg, #fffbeb, #fef3c7)', borderRadius: '16px 16px 40px 40px', border: '2px solid rgba(245,158,11,0.15)', boxShadow: '0 24px 64px rgba(0,0,0,0.08)', display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' }}>
-              <div style={{ position: 'absolute', top: -28, left: '50%', transform: 'translateX(-50%)', width: 100, height: 48, border: '4px solid rgba(217,119,6,0.2)', borderBottom: 'none', borderRadius: '28px 28px 0 0' }} />
-              <div style={{ position: 'absolute', top: 16, right: -8, background: '#dc2626', color: '#fff', padding: '6px 20px 6px 12px', borderRadius: '8px 0 0 8px', fontSize: 9, fontWeight: 900, letterSpacing: 2, textTransform: 'uppercase' }}>端午慶典</div>
-              <div style={{ padding: '32px 28px 16px', textAlign: 'center' }}>
-                <h2 style={{ fontSize: 22, fontWeight: 900, color: 'rgba(120,53,15,0.2)', letterSpacing: 4, textTransform: 'uppercase', fontFamily: '"Noto Serif TC", serif' }}>購物袋</h2>
-                <p style={{ fontSize: 10, fontWeight: 700, color: 'rgba(180,120,50,0.4)', marginTop: 4 }}>已收集 {userData.inventory.length} 個戰利品</p>
-              </div>
-              <div style={{ flex: 1, overflowY: 'auto', padding: '8px 24px 24px' }}>
-                {userData.inventory.length === 0 ? (
-                  <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'rgba(180,120,50,0.3)', fontWeight: 700, fontSize: 14 }}>
-                    <span style={{ fontSize: 48, marginBottom: 12, opacity: 0.3 }}>🛍️</span>購物袋還是空的...
-                  </div>
-                ) : (
-                  <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: 12 }}>
-                    {userData.inventory.map((item, idx) => (
-                      <div key={idx} style={{ width: 88, background: '#fff', padding: 8, borderRadius: 16, boxShadow: '0 2px 8px rgba(0,0,0,0.06)', border: '1px solid rgba(245,158,11,0.1)', transform: `rotate(${item.stackRotation || 0}deg)`, cursor: 'default', animation: `dropIn 0.4s cubic-bezier(0.175,0.885,0.32,1.275) ${idx * 0.06}s both` }}>
-                        <div style={{ width: '100%', aspectRatio: '1', background: 'linear-gradient(135deg, #f0fdf4, #ecfdf5)', borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 28, marginBottom: 6, overflow: 'hidden' }}>
-                          {item.imageUrl ? <img src={item.imageUrl} style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={e => { e.target.style.display = 'none'; }} /> : (booths.find(b => b.id === item.boothId || b.name === item.boothName)?.emoji || '🎁')}
-                        </div>
-                        <p style={{ fontSize: 9, fontWeight: 800, textAlign: 'center', lineHeight: 1.2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.name}</p>
-                        <p style={{ fontSize: 7, color: '#94a3b8', fontWeight: 600, textAlign: 'center', marginTop: 2 }}>{item.boothName}</p>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-              <div style={{ padding: '12px 24px', textAlign: 'center', borderTop: '1px solid rgba(245,158,11,0.1)' }}>
-                <p style={{ fontSize: 8, fontWeight: 800, color: 'rgba(180,120,50,0.25)', letterSpacing: 2, textTransform: 'uppercase' }}>Thank you for visiting</p>
-              </div>
-            </div>
-          </div>
+          <PhysicsBag inventory={userData.inventory} booths={booths} />
         )}
 
-        {/* STAMPS + LEADERBOARD */}
+        {/* STAMPS：翻頁集章冊 + 排行榜 */}
         {view === 'stamps' && (
           <div style={{ height: '100%', overflowY: 'auto', padding: '24px 20px 40px', animation: 'fadeSlideUp 0.5s ease-out' }}>
-            <h2 style={{ fontSize: 28, fontWeight: 900, fontFamily: '"Noto Serif TC", serif', marginBottom: 20, letterSpacing: 2 }}>集章紀念冊</h2>
-            <div style={{ background: '#fff', padding: 28, borderRadius: 28, boxShadow: '0 8px 32px rgba(0,0,0,0.04)', border: '1px solid rgba(0,0,0,0.04)', marginBottom: 24 }}>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 20, marginBottom: 28 }}>
-                {booths.length === 0 && (
-                  <div style={{ gridColumn: '1 / -1', textAlign: 'center', padding: '30px 0', color: '#94a3b8' }}>
-                    <span style={{ fontSize: 32 }}>🏮</span>
-                    <p style={{ fontSize: 12, fontWeight: 700, marginTop: 8 }}>攤位籌備中，還沒有印章可以蒐集</p>
-                  </div>
-                )}
-                {booths.map((booth, i) => {
-                  const stamped = userData.stamps.includes(booth.id);
-                  return (
-                    <div key={booth.id} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, animation: `fadeSlideUp 0.5s ease-out ${i * 0.1}s both` }}>
-                      <div style={{ transition: 'all 0.5s cubic-bezier(0.16,1,0.3,1)', transform: stamped ? 'rotate(6deg) scale(1.05)' : 'none', filter: stamped ? 'none' : 'grayscale(0.5)' }}>
-                        <StampDesign stamp={booth.stamp} size={88} stamped={stamped} boothEmoji={booth.emoji} />
-                      </div>
-                      <span style={{ fontSize: 10, fontWeight: 800, color: stamped ? '#334155' : '#cbd5e1', letterSpacing: 1 }}>{booth.name}</span>
-                    </div>
-                  );
-                })}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 }}>
+              <HexTag bg={C.ink} color="#fff" size={30}>章</HexTag>
+              <h2 style={{ fontSize: 26, fontWeight: 900, fontFamily: '"Noto Serif TC", serif', letterSpacing: 3 }}>集章紀念冊</h2>
+            </div>
+
+            <StampBook booths={booths} stamps={userData.stamps} />
+
+            {/* 進度 */}
+            <div style={{ position: 'relative', background: C.paper, clipPath: CUT(12), border: `1px solid ${C.line}`, padding: '16px 20px', margin: '18px 0 24px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                <span style={{ fontSize: 10, fontWeight: 800, color: '#8a9a90', letterSpacing: 2 }}>／ 我的進度</span>
+                <span style={{ fontSize: 12, fontWeight: 900, fontFamily: 'monospace' }}>{userData.stamps.length} / {booths.length}</span>
               </div>
-              <div style={{ marginBottom: 8 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                  <span style={{ fontSize: 10, fontWeight: 800, color: '#94a3b8', letterSpacing: 1 }}>我的進度</span>
-                  <span style={{ fontSize: 12, fontWeight: 900, color: '#0f172a' }}>{userData.stamps.length} / {booths.length}</span>
-                </div>
-                <div style={{ height: 8, background: '#f1f5f9', borderRadius: 4, overflow: 'hidden' }}>
-                  <div style={{ height: '100%', borderRadius: 4, transition: 'width 0.8s cubic-bezier(0.16,1,0.3,1)', width: `${(userData.stamps.length / (booths.length || 1)) * 100}%`, background: booths.length > 0 && userData.stamps.length === booths.length ? 'linear-gradient(90deg, #fbbf24, #f59e0b)' : 'linear-gradient(90deg, #0d9488, #14b8a6)' }} />
-                </div>
+              <div style={{ height: 6, background: '#ece8d9', position: 'relative' }}>
+                <div style={{ height: '100%', transition: 'width 0.8s cubic-bezier(0.16,1,0.3,1)', width: `${(userData.stamps.length / (booths.length || 1)) * 100}%`, background: booths.length > 0 && userData.stamps.length === booths.length ? `linear-gradient(90deg, #fbbf24, ${C.gold})` : `linear-gradient(90deg, ${C.teal}, ${C.ink})` }} />
               </div>
               {userData.stamps.length === booths.length && booths.length > 0 && (
-                <div style={{ position: 'relative', textAlign: 'center', marginTop: 16, padding: '20px', background: 'linear-gradient(135deg, #fef3c7, #fde68a)', borderRadius: 20, border: '2px solid rgba(245,158,11,0.3)', overflow: 'hidden', animation: 'eggPop 0.6s cubic-bezier(0.16,1,0.3,1)' }}>
-                  {/* 漂浮粽子彩蛋 */}
-                  {['🐉', '🎉', '🏮', '✨', '🥇', '🎊'].map((icon, i) => (
-                    <span key={i} style={{ position: 'absolute', fontSize: 18, left: `${10 + i * 15}%`, top: '50%', animation: `eggFloat 2.5s ease-in-out ${i * 0.3}s infinite`, opacity: 0.7, pointerEvents: 'none' }}>{icon}</span>
+                <div style={{ position: 'relative', textAlign: 'center', marginTop: 14, padding: '18px', background: C.goldBg, clipPath: CUT(12), border: '1.5px solid rgba(183,121,31,0.4)', overflow: 'hidden', animation: 'eggPop 0.6s cubic-bezier(0.16,1,0.3,1)' }}>
+                  {[0, 1, 2, 3, 4].map(i => (
+                    <span key={i} style={{ position: 'absolute', left: `${10 + i * 19}%`, top: '50%', animation: `eggFloat 2.5s ease-in-out ${i * 0.3}s infinite`, opacity: 0.6, pointerEvents: 'none' }}>
+                      <Icon name={['boat', 'spark', 'lantern', 'medal', 'stamp'][i]} size={17} color={C.gold} />
+                    </span>
                   ))}
                   <div style={{ position: 'relative', zIndex: 2 }}>
-                    <div style={{ fontSize: 36, marginBottom: 4, animation: 'eggBounce 1.5s ease-in-out infinite' }}>🏆</div>
-                    <p style={{ fontSize: 16, fontWeight: 900, color: '#92400e', fontFamily: '"Noto Serif TC", serif' }}>大功告成！</p>
+                    <Icon name="trophy" size={34} color="#8a5a12" style={{ margin: '0 auto 4px', animation: 'eggBounce 1.5s ease-in-out infinite' }} />
+                    <p style={{ fontSize: 16, fontWeight: 900, color: '#8a5a12', fontFamily: '"Noto Serif TC", serif' }}>大功告成！</p>
                     <p style={{ fontSize: 11, fontWeight: 700, color: '#a16207', marginTop: 4 }}>你已蒐集全部 {booths.length} 個印章，是慶典的完美旅人！</p>
                   </div>
-                  <style>{`
-                    @keyframes eggPop { 0%{opacity:0;transform:scale(0.8)} 100%{opacity:1;transform:scale(1)} }
-                    @keyframes eggFloat { 0%,100%{transform:translateY(0) rotate(0deg)} 50%{transform:translateY(-16px) rotate(10deg)} }
-                    @keyframes eggBounce { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-6px)} }
-                  `}</style>
                 </div>
               )}
             </div>
+
             <Leaderboard booths={booths} leaderboard={leaderboard} currentUser={userData.username} currentUserStamps={userData.stamps} onRefresh={loadLeaderboard} isDemo={userData.isDemo} />
           </div>
         )}
       </main>
 
       {/* Bottom Nav */}
-      <nav style={{ position: 'fixed', bottom: 0, left: 0, right: 0, background: 'rgba(255,255,255,0.95)', backdropFilter: 'blur(20px)', borderTop: '1px solid rgba(0,0,0,0.06)', padding: '8px 32px 20px', display: 'flex', justifyContent: 'space-around', alignItems: 'center', zIndex: 50 }}>
+      <nav style={{ position: 'fixed', bottom: 0, left: 0, right: 0, background: 'rgba(253,252,246,0.95)', backdropFilter: 'blur(20px)', borderTop: `1px solid ${C.line}`, padding: '8px 32px 20px', display: 'flex', justifyContent: 'space-around', alignItems: 'center', zIndex: 50 }}>
         {[
-          { id: 'home', icon: '🗺️', label: '街道' },
-          { id: 'inventory', icon: '🛍️', label: '購物袋' },
-          { id: 'stamps', icon: '🏅', label: '集章' }
+          { id: 'home', icon: 'map', label: '街道' },
+          { id: 'inventory', icon: 'bag', label: '購物袋' },
+          { id: 'stamps', icon: 'book', label: '集章' }
         ].map(item => {
           const active = view === item.id || (view === 'booth' && item.id === 'home');
           return (
             <button key={item.id} onClick={() => { if (item.id === 'stamps' && !userData.isDemo) loadLeaderboard(); if (view === 'booth' && item.id === 'home') closeBooth(); else setView(item.id); }}
               onMouseEnter={() => setHoveredNav(item.id)} onMouseLeave={() => setHoveredNav(null)}
-              style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, background: 'none', border: 'none', cursor: 'pointer', color: active ? '#0d9488' : '#cbd5e1', transition: 'all 0.3s', transform: active ? 'scale(1.1)' : hoveredNav === item.id ? 'scale(1.05)' : 'scale(1)' }}>
-              <span style={{ fontSize: 24, filter: active ? 'none' : 'grayscale(1) opacity(0.4)' }}>{item.icon}</span>
-              <span style={{ fontSize: 9, fontWeight: 800, letterSpacing: 2, textTransform: 'uppercase', opacity: active ? 1 : 0.4 }}>{item.label}</span>
-              {active && <div style={{ width: 4, height: 4, borderRadius: 2, background: '#0d9488', marginTop: 2 }} />}
+              style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, background: 'none', border: 'none', cursor: 'pointer', color: active ? C.teal : '#b3ae9d', transition: 'all 0.3s', transform: active ? 'scale(1.08)' : hoveredNav === item.id ? 'scale(1.04)' : 'scale(1)' }}>
+              <Icon name={item.icon} size={22} sw={active ? 1.9 : 1.6} />
+              <span style={{ fontSize: 9, fontWeight: 800, letterSpacing: 2, textTransform: 'uppercase', opacity: active ? 1 : 0.5 }}>{item.label}</span>
+              <div style={{ width: 14, height: 2, background: active ? C.teal : 'transparent', marginTop: 1 }} />
             </button>
           );
         })}
@@ -1008,1135 +986,1168 @@ function AppInner() {
         @keyframes fadeIn { from{opacity:0} to{opacity:1} }
         @keyframes zoomIn { from{opacity:0;transform:scale(0.8)} to{opacity:1;transform:scale(1)} }
         @keyframes slideUp { from{opacity:0;transform:translateY(40px)} to{opacity:1;transform:translateY(0)} }
-        @keyframes riverScroll { from{transform:translateX(90vw)} to{transform:translateX(-100%)} }
-        @keyframes dropIn { 0%{opacity:0;transform:translateY(-30px) rotate(-15deg)} 60%{transform:translateY(5px) rotate(3deg)} 100%{opacity:1;transform:translateY(0)} }
         @keyframes shimmer { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
+        @keyframes stampCardIn { 0%{opacity:0;transform:translateY(30px) scale(0.9)} 100%{opacity:1;transform:translateY(0) scale(1)} }
+        @keyframes stampPress { 0%{transform:scale(2.2) rotate(-12deg);opacity:0} 60%{transform:scale(0.92) rotate(4deg);opacity:1} 100%{transform:scale(1) rotate(0deg)} }
+        @keyframes stampCelebrate { 0%,100%{transform:translateY(0) rotate(0deg)} 50%{transform:translateY(-12px) rotate(12deg)} }
+        @keyframes eggPop { 0%{opacity:0;transform:scale(0.8)} 100%{opacity:1;transform:scale(1)} }
+        @keyframes eggFloat { 0%,100%{transform:translateY(0) rotate(0deg)} 50%{transform:translateY(-16px) rotate(10deg)} }
+        @keyframes eggBounce { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-6px)} }
+        @keyframes flipNext { 0%{transform:perspective(1200px) rotateY(-72deg);opacity:0.3} 100%{transform:perspective(1200px) rotateY(0deg);opacity:1} }
+        @keyframes flipPrev { 0%{transform:perspective(1200px) rotateY(72deg);opacity:0.3} 100%{transform:perspective(1200px) rotateY(0deg);opacity:1} }
+        @keyframes eventPop { 0%{transform:scale(0.6);opacity:0} 60%{transform:scale(1.08)} 100%{transform:scale(1);opacity:1} }
+        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.5} }
+        @keyframes cheerFloat { 0%{opacity:1;transform:translateY(0)} 100%{opacity:0;transform:translateY(-50px) scale(1.4)} }
+        @keyframes boatRock { 0%,100%{transform:rotate(-8deg) translateY(0)} 50%{transform:rotate(8deg) translateY(-4px)} }
       `}</style>
     </div>
   );
 }
 
 // ============================================================
-// 河道龍舟賽況 (響應式，手機優先)
+// 物理購物袋（第3點需求）
+// 商品購買後會「掉進」袋子裡，可以拖曳、丟擲、互相碰撞
 // ============================================================
-function calcRacePos(team) {
-  if (!team.turnSuccess && team.outboundScore < 200) {
-    const pct = (team.outboundScore / 200) * 100;
-    return { pct, dir: 'out', label: `衝刺 ${team.outboundScore}` };
-  } else if (!team.turnSuccess && team.outboundScore >= 200) {
-    return { pct: 100, dir: 'turn', label: '🚩 奪旗中' };
-  } else if (team.inboundScore >= 200) {
-    return { pct: 0, dir: 'finish', label: '🏆 完賽' };
-  } else {
-    const pct = 100 - ((team.inboundScore / 200) * 100);
-    return { pct, dir: 'in', label: `回程 ${team.inboundScore}` };
-  }
-}
+function PhysicsBag({ inventory, booths }) {
+  const areaRef = useRef(null);
+  const bodiesRef = useRef([]);
+  const dragRef = useRef(null);
+  const rafRef = useRef(null);
+  const [bodyIds, setBodyIds] = useState([]);
+  const [dropKey, setDropKey] = useState(0);
+  const [detail, setDetail] = useState(null);
 
-function RiverRaceTracker({ teams, onFlagClick, isDemo, loading }) {
-  const [collapsed, setCollapsed] = useState(false);
-  const [cheered, setCheered] = useState({});
-  const [particles, setParticles] = useState([]);
-  const containerRef = useRef(null);
-  const [isMobile, setIsMobile] = useState(false);
+  const totalSpent = inventory.reduce((s, it) => s + (Number(it.price) || 0), 0);
+  const BODY = 92;          // 每個物品的視覺尺寸（px）
+  const R = BODY / 2;
 
+  const findEmoji = (item) => (booths.find(b => b.id === item.boothId || b.name === item.boothName) || {}).emoji || '';
+
+  // 生成物體（從袋口上方依序掉落）
   useEffect(() => {
-    const check = () => setIsMobile(window.innerWidth < 640);
-    check();
-    window.addEventListener('resize', check);
-    return () => window.removeEventListener('resize', check);
+    const area = areaRef.current;
+    const W = area ? area.clientWidth : 320;
+    bodiesRef.current = inventory.map((item, i) => ({
+      id: 'b' + i,
+      item,
+      r: R,
+      x: R + 14 + Math.random() * Math.max(10, W - 2 * (R + 14)),
+      y: -R - i * (BODY + 30) - 20,
+      vx: (Math.random() - 0.5) * 3,
+      vy: 0,
+      rot: (Math.random() - 0.5) * 26,
+      vr: (Math.random() - 0.5) * 3,
+      node: null,
+    }));
+    setBodyIds(bodiesRef.current.map(b => b.id));
+  }, [inventory, dropKey]);
+
+  // 物理迴圈：重力、牆壁/袋底反彈、圓形碰撞
+  useEffect(() => {
+    const step = () => {
+      const area = areaRef.current;
+      if (area) {
+        const W = area.clientWidth, H = area.clientHeight;
+        const bodies = bodiesRef.current;
+        const GRAV = 0.55, REST = 0.38, FRIC = 0.996;
+        bodies.forEach(b => {
+          const dragging = dragRef.current && dragRef.current.id === b.id;
+          if (!dragging) {
+            b.vy += GRAV; b.vx *= FRIC; b.vr *= 0.985;
+            b.x += b.vx; b.y += b.vy; b.rot += b.vr;
+            if (b.x < b.r + 4) { b.x = b.r + 4; b.vx = Math.abs(b.vx) * REST; b.vr -= b.vy * 0.15; }
+            if (b.x > W - b.r - 4) { b.x = W - b.r - 4; b.vx = -Math.abs(b.vx) * REST; b.vr += b.vy * 0.15; }
+            if (b.y > H - b.r - 8) {
+              b.y = H - b.r - 8;
+              if (Math.abs(b.vy) > 1.2) b.vy = -Math.abs(b.vy) * REST; else b.vy = 0;
+              b.vx *= 0.92;
+              b.rot += (Math.round(b.rot / 12) * 12 - b.rot) * 0.08; // 落地後慢慢擺正一點
+            }
+            if (b.y < -600) b.y = -600;
+          }
+        });
+        // 兩兩碰撞
+        for (let i = 0; i < bodies.length; i++) {
+          for (let j = i + 1; j < bodies.length; j++) {
+            const a = bodies[i], c = bodies[j];
+            const dx = c.x - a.x, dy = c.y - a.y;
+            const d = Math.hypot(dx, dy) || 0.01;
+            const minD = a.r + c.r - 14; // 允許些微重疊，堆起來比較可愛
+            if (d < minD) {
+              const nx = dx / d, ny = dy / d, overlap = (minD - d) / 2;
+              const aDrag = dragRef.current && dragRef.current.id === a.id;
+              const cDrag = dragRef.current && dragRef.current.id === c.id;
+              if (!aDrag) { a.x -= nx * overlap * (cDrag ? 2 : 1); a.y -= ny * overlap * (cDrag ? 2 : 1); }
+              if (!cDrag) { c.x += nx * overlap * (aDrag ? 2 : 1); c.y += ny * overlap * (aDrag ? 2 : 1); }
+              const rvx = c.vx - a.vx, rvy = c.vy - a.vy;
+              const vn = rvx * nx + rvy * ny;
+              if (vn < 0) {
+                const imp = -(1 + 0.25) * vn / 2;
+                if (!aDrag) { a.vx -= imp * nx; a.vy -= imp * ny; a.vr -= imp * 0.4; }
+                if (!cDrag) { c.vx += imp * nx; c.vy += imp * ny; c.vr += imp * 0.4; }
+              }
+            }
+          }
+        }
+        bodies.forEach(b => {
+          if (b.node) b.node.style.transform = `translate(${b.x - b.r}px, ${b.y - b.r}px) rotate(${b.rot}deg)`;
+        });
+      }
+      rafRef.current = requestAnimationFrame(step);
+    };
+    rafRef.current = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(rafRef.current);
   }, []);
 
-  const sorted = [...teams].sort((a, b) => {
-    const sa = a.outboundScore + (a.turnSuccess ? 200 + a.inboundScore : 0);
-    const sb = b.outboundScore + (b.turnSuccess ? 200 + b.inboundScore : 0);
-    return sb - sa;
-  });
+  // 拖曳（滑鼠 / 觸控通用），放開時保留速度變成丟擲
+  const onPointerDown = (e, id) => {
+    e.preventDefault();
+    const area = areaRef.current; if (!area) return;
+    const rect = area.getBoundingClientRect();
+    const b = bodiesRef.current.find(x => x.id === id); if (!b) return;
+    dragRef.current = { id, lastX: e.clientX, lastY: e.clientY, t: performance.now(), moved: 0 };
+    b.vx = 0; b.vy = 0; b.vr = 0;
+    const move = (ev) => {
+      const d = dragRef.current; if (!d) return;
+      const now = performance.now(); const dt = Math.max(1, now - d.t);
+      b.vx = (ev.clientX - d.lastX) / dt * 14;
+      b.vy = (ev.clientY - d.lastY) / dt * 14;
+      d.moved += Math.abs(ev.clientX - d.lastX) + Math.abs(ev.clientY - d.lastY);
+      d.lastX = ev.clientX; d.lastY = ev.clientY; d.t = now;
+      b.x = Math.max(b.r, Math.min(rect.width - b.r, ev.clientX - rect.left));
+      b.y = Math.max(-b.r, Math.min(rect.height - b.r - 8, ev.clientY - rect.top));
+      b.vr = b.vx * 0.5;
+      if (b.node) b.node.style.transform = `translate(${b.x - b.r}px, ${b.y - b.r}px) rotate(${b.rot}deg)`;
+    };
+    const up = () => {
+      const d = dragRef.current;
+      if (d && d.moved < 6) setDetail(b.item);  // 幾乎沒移動 → 視為點擊，開商品小卡
+      dragRef.current = null;
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  };
+
+  return (
+    <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '18px 20px', animation: 'fadeSlideUp 0.5s ease-out' }}>
+      <div style={{ width: '100%', maxWidth: 430, height: '92%', display: 'flex', flexDirection: 'column', position: 'relative' }}>
+
+        {/* 提袋提把 */}
+        <div style={{ height: 44, display: 'flex', justifyContent: 'center', flexShrink: 0 }}>
+          <div style={{ width: 120, height: 60, border: `3px solid rgba(183,121,31,0.45)`, borderBottom: 'none', borderRadius: '30px 30px 0 0', marginBottom: -18 }} />
+        </div>
+
+        {/* 袋身 */}
+        <div style={{
+          flex: 1, minHeight: 0, position: 'relative', display: 'flex', flexDirection: 'column',
+          background: `linear-gradient(180deg, ${C.paper}, #f7efdc)`,
+          clipPath: 'polygon(3% 0, 97% 0, 100% 100%, 0 100%)',
+          border: `1.5px solid rgba(183,121,31,0.35)`,
+        }}>
+          {/* 袋口資訊列 */}
+          <div style={{ flexShrink: 0, padding: '16px 22px 10px', borderBottom: `1px dashed rgba(183,121,31,0.3)`, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
+            <div>
+              <h2 style={{ fontSize: 19, fontWeight: 900, fontFamily: '"Noto Serif TC", serif', letterSpacing: 4, color: '#7a5417' }}>購物袋</h2>
+              <p style={{ fontSize: 9, fontWeight: 700, color: 'rgba(138,90,18,0.55)', letterSpacing: 2, marginTop: 2 }}>已收集 {inventory.length} 個戰利品・可以拖曳把玩</p>
+            </div>
+            <div style={{ textAlign: 'right' }}>
+              <p style={{ fontSize: 9, fontWeight: 800, color: 'rgba(138,90,18,0.6)', letterSpacing: 2 }}>總消費</p>
+              <p style={{ fontSize: 20, fontWeight: 900, color: '#8a5a12', fontFamily: 'monospace', lineHeight: 1, display: 'flex', alignItems: 'center', gap: 4, justifyContent: 'flex-end' }}>
+                <Icon name="coin" size={15} color={C.gold} />${totalSpent}
+              </p>
+            </div>
+          </div>
+
+          {/* 物理區 */}
+          <div ref={areaRef} style={{ flex: 1, minHeight: 0, position: 'relative', overflow: 'hidden', touchAction: 'none' }}>
+            {inventory.length === 0 && (
+              <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'rgba(138,90,18,0.35)', fontWeight: 700, fontSize: 13, gap: 10 }}>
+                <Icon name="bag" size={44} color="rgba(138,90,18,0.25)" />
+                購物袋還是空的...
+                <span style={{ fontSize: 10, fontWeight: 600 }}>去攤位逛逛，買到的商品會掉進來喔</span>
+              </div>
+            )}
+            {bodyIds.map((id) => {
+              const b = bodiesRef.current.find(x => x.id === id);
+              if (!b) return null;
+              const emoji = findEmoji(b.item);
+              return (
+                <div key={id + '_' + dropKey}
+                  ref={el => { b.node = el; }}
+                  onPointerDown={(e) => onPointerDown(e, id)}
+                  style={{
+                    position: 'absolute', top: 0, left: 0, width: BODY, height: BODY,
+                    cursor: 'grab', touchAction: 'none', willChange: 'transform',
+                    display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+                    userSelect: 'none', WebkitUserSelect: 'none',
+                  }}>
+                  {/* 商品圖：去背 PNG 會直接浮在袋子裡；沒圖用禮物線圖/攤位 emoji */}
+                  <div style={{ width: BODY - 34, height: BODY - 34, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', filter: 'drop-shadow(0 3px 5px rgba(90,60,20,0.28))' }}>
+                    {b.item.imageUrl
+                      ? <img src={b.item.imageUrl} alt="" draggable={false} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} onError={e => { e.target.style.display = 'none'; }} />
+                      : (emoji ? <span style={{ fontSize: 38 }}>{emoji}</span> : <Icon name="gift" size={40} color="#a0742c" />)}
+                  </div>
+                  <div style={{ pointerEvents: 'none', textAlign: 'center', marginTop: 2, background: 'rgba(253,252,246,0.85)', clipPath: CUT(4), padding: '2px 7px', border: `1px solid rgba(183,121,31,0.25)` }}>
+                    <p style={{ fontSize: 9, fontWeight: 800, color: '#5c4310', lineHeight: 1.2, maxWidth: BODY - 6, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.item.name}</p>
+                    <p style={{ fontSize: 7, fontWeight: 700, color: 'rgba(122,84,23,0.65)', maxWidth: BODY - 6, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.item.boothName || ''}</p>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* 袋底 */}
+          <div style={{ flexShrink: 0, padding: '8px 20px 12px', textAlign: 'center', borderTop: `1px dashed rgba(183,121,31,0.3)`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <p style={{ fontSize: 8, fontWeight: 800, color: 'rgba(138,90,18,0.3)', letterSpacing: 3, textTransform: 'uppercase' }}>Thank you for visiting</p>
+            <button onClick={() => setDropKey(k => k + 1)} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '5px 12px', clipPath: CUT(6), border: '1px solid rgba(183,121,31,0.35)', background: 'rgba(253,252,246,0.8)', fontSize: 10, fontWeight: 800, color: '#8a5a12', cursor: 'pointer' }}>
+              <Icon name="refresh" size={11} /> 重新倒入
+            </button>
+          </div>
+        </div>
+
+        {/* 商品詳情小卡（點一下商品開啟） */}
+        {detail && (
+          <div onClick={() => setDetail(null)} style={{ position: 'absolute', inset: 0, zIndex: 20, background: 'rgba(30,20,5,0.45)', backdropFilter: 'blur(3px)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', animation: 'fadeIn 0.2s' }}>
+            <div onClick={e => e.stopPropagation()} style={{ position: 'relative', width: '82%', maxWidth: 280, background: C.paper, clipPath: CUT(14), padding: '24px 20px 18px', textAlign: 'center', cursor: 'default', animation: 'zoomIn 0.25s cubic-bezier(0.16,1,0.3,1)' }}>
+              <Corners size={10} inset={5} color={C.gold} />
+              <div style={{ height: 90, display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 10 }}>
+                {detail.imageUrl
+                  ? <img src={detail.imageUrl} alt="" style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', filter: 'drop-shadow(0 4px 8px rgba(90,60,20,0.25))' }} />
+                  : <Icon name="gift" size={56} color="#a0742c" />}
+              </div>
+              <p style={{ fontSize: 16, fontWeight: 900, fontFamily: '"Noto Serif TC", serif' }}>{detail.name}</p>
+              <p style={{ fontSize: 10, fontWeight: 700, color: C.teal, marginTop: 2 }}>{detail.boothName || ''}{detail.date ? `・${detail.date}` : ''}</p>
+              {detail.description && <p style={{ fontSize: 11, color: '#6b7280', lineHeight: 1.7, marginTop: 8 }}>{detail.description}</p>}
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4, marginTop: 10, background: C.goldBg, clipPath: CUT(6), padding: '4px 12px', border: '1px solid rgba(183,121,31,0.3)' }}>
+                <Icon name="coin" size={12} color={C.gold} />
+                <span style={{ fontSize: 12, fontWeight: 900, color: '#8a5a12', fontFamily: 'monospace' }}>${Number(detail.price) || 0}</span>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// 翻頁集章冊（第2點需求）
+// 封面 + 每頁 4 個章，左側線圈裝訂，手機優先
+// ============================================================
+function StampBook({ booths, stamps }) {
+  const PER_PAGE = 4;
+  const pages = [];
+  for (let i = 0; i < booths.length; i += PER_PAGE) pages.push(booths.slice(i, i + PER_PAGE));
+  const totalPages = pages.length + 1; // 含封面
+  const [page, setPage] = useState(0);
+  const [dir, setDir] = useState('flipNext');
+
+  const go = (d) => {
+    const np = page + d;
+    if (np < 0 || np >= totalPages) return;
+    setDir(d > 0 ? 'flipNext' : 'flipPrev');
+    setPage(np);
+  };
+
+  // 線圈裝訂
+  const rings = (dark) => (
+    <div style={{ position: 'absolute', top: 0, bottom: 0, left: 8, width: 18, display: 'flex', flexDirection: 'column', justifyContent: 'space-evenly', zIndex: 4 }}>
+      {Array.from({ length: 9 }).map((_, i) => (
+        <div key={i} style={{ width: 15, height: 15, borderRadius: '50%', border: `2.5px solid ${dark ? 'rgba(255,255,255,0.4)' : '#9a9382'}`, background: dark ? 'rgba(0,0,0,0.25)' : C.cream, boxShadow: 'inset 0 1px 2px rgba(0,0,0,0.2)' }} />
+      ))}
+    </div>
+  );
+
+  const isCover = page === 0;
+  const pageBooths = isCover ? [] : pages[page - 1] || [];
+  const collectedCount = stamps.length;
+
+  return (
+    <div style={{ maxWidth: 430, margin: '0 auto' }}>
+      <div style={{ perspective: 1400 }}>
+        <div key={page} style={{
+          position: 'relative', minHeight: 380, transformOrigin: dir === 'flipNext' ? 'left center' : 'right center',
+          animation: `${dir} 0.55s cubic-bezier(0.2,0.9,0.3,1) both`,
+        }}>
+          {isCover ? (
+            /* ===== 封面 ===== */
+            <div style={{ position: 'relative', minHeight: 380, background: `linear-gradient(150deg, ${C.ink}, #0f2922 70%, #123a30)`, clipPath: CUT(16), padding: '46px 30px 30px 44px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center', overflow: 'hidden' }}>
+              {rings(true)}
+              <Corners color="rgba(251,191,36,0.55)" size={14} inset={8} />
+              <div style={{ position: 'absolute', inset: 0, opacity: 0.07, backgroundImage: 'linear-gradient(rgba(255,255,255,0.7) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.7) 1px, transparent 1px)', backgroundSize: '34px 34px' }} />
+              <div style={{ width: 110, height: 110, borderRadius: '50%', border: '1.5px solid rgba(251,191,36,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative', marginBottom: 22 }}>
+                <div style={{ position: 'absolute', inset: 7, borderRadius: '50%', border: '1px dashed rgba(251,191,36,0.45)' }} />
+                <Icon name="boat" size={52} color="#fbbf24" sw={1.5} />
+              </div>
+              <p style={{ fontSize: 10, fontWeight: 700, color: 'rgba(167,215,195,0.55)', letterSpacing: 6, textTransform: 'uppercase', marginBottom: 8 }}>Stamp Rally Book</p>
+              <h3 style={{ fontSize: 24, fontWeight: 900, color: '#fff', fontFamily: '"Noto Serif TC", serif', letterSpacing: 5, marginBottom: 6 }}>盛夏慶典<br />集章紀念冊</h3>
+              <p style={{ fontSize: 11, fontWeight: 700, color: 'rgba(251,191,36,0.85)', fontFamily: 'monospace', marginTop: 10 }}>{collectedCount} / {booths.length} COLLECTED</p>
+              <p style={{ fontSize: 10, color: 'rgba(167,215,195,0.4)', marginTop: 18 }}>點下方「翻頁」開始翻閱 →</p>
+            </div>
+          ) : (
+            /* ===== 內頁 ===== */
+            <div style={{ position: 'relative', minHeight: 380, background: `linear-gradient(160deg, ${C.paper}, #f6f1e0)`, clipPath: CUT(16), border: `1px solid ${C.line}`, padding: '22px 18px 18px 42px', overflow: 'hidden' }}>
+              {rings(false)}
+              <div style={{ position: 'absolute', inset: 0, opacity: 0.5, backgroundImage: 'radial-gradient(rgba(18,63,48,0.08) 1px, transparent 1px)', backgroundSize: '18px 18px', pointerEvents: 'none' }} />
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14, position: 'relative' }}>
+                <span style={{ fontSize: 9, fontWeight: 800, color: '#8a9a90', letterSpacing: 3, textTransform: 'uppercase' }}>Stamp Page</span>
+                <span style={{ fontSize: 10, fontWeight: 800, color: C.teal, fontFamily: 'monospace' }}>P.{page} / {pages.length}</span>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '18px 10px', position: 'relative' }}>
+                {pageBooths.map((booth, i) => {
+                  const stamped = stamps.includes(booth.id);
+                  const rot = [(-5), 4, 6, -3][i % 4];
+                  return (
+                    <div key={booth.id} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, animation: `fadeSlideUp 0.45s ease-out ${i * 0.08 + 0.15}s both` }}>
+                      <div style={{ position: 'relative' }}>
+                        <StampDesign stamp={booth.stamp} size={96} stamped={stamped} boothEmoji={booth.emoji} rotate={stamped ? rot : 0} />
+                        {stamped && (
+                          <div style={{ position: 'absolute', bottom: -4, right: -6, background: C.teal, clipPath: CUT(4), padding: '2px 7px', display: 'flex', alignItems: 'center', gap: 3 }}>
+                            <Icon name="check" size={9} color="#fff" sw={2.4} />
+                            <span style={{ fontSize: 8, fontWeight: 900, color: '#fff', letterSpacing: 1 }}>已收藏</span>
+                          </div>
+                        )}
+                      </div>
+                      <span style={{ fontSize: 10, fontWeight: 800, color: stamped ? C.ink : '#bdb8a6', letterSpacing: 1, textAlign: 'center', maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{booth.name}</span>
+                    </div>
+                  );
+                })}
+                {pageBooths.length === 0 && (
+                  <div style={{ gridColumn: '1 / -1', textAlign: 'center', padding: '60px 0', color: '#bdb8a6' }}>
+                    <Icon name="lantern" size={32} color="#bdb8a6" style={{ margin: '0 auto 8px' }} />
+                    <p style={{ fontSize: 12, fontWeight: 700 }}>攤位籌備中，還沒有印章可以蒐集</p>
+                  </div>
+                )}
+              </div>
+              <div style={{ position: 'absolute', bottom: 10, left: 42, right: 18, textAlign: 'center' }}>
+                <p style={{ fontSize: 8, fontWeight: 800, color: 'rgba(138,154,144,0.5)', letterSpacing: 4, textTransform: 'uppercase' }}>Dragon Boat Festival</p>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* 翻頁控制 */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 12 }}>
+        <button onClick={() => go(-1)} disabled={page === 0} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '9px 16px', clipPath: CUT(8), border: `1px solid ${C.line}`, background: page === 0 ? '#ece8d9' : C.paper, color: page === 0 ? '#b3ae9d' : C.ink, fontSize: 12, fontWeight: 800, cursor: page === 0 ? 'default' : 'pointer' }}>
+          <Icon name="chevL" size={13} /> 上一頁
+        </button>
+        <div style={{ display: 'flex', gap: 5 }}>
+          {Array.from({ length: totalPages }).map((_, i) => (
+            <div key={i} onClick={() => { setDir(i > page ? 'flipNext' : 'flipPrev'); setPage(i); }} style={{ width: i === page ? 18 : 7, height: 7, background: i === page ? C.teal : '#cfc9b6', cursor: 'pointer', transition: 'all 0.3s', clipPath: CUT(2) }} />
+          ))}
+        </div>
+        <button onClick={() => go(1)} disabled={page >= totalPages - 1} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '9px 16px', clipPath: CUT(8), border: 'none', background: page >= totalPages - 1 ? '#ece8d9' : `linear-gradient(135deg, ${C.teal}, ${C.ink})`, color: page >= totalPages - 1 ? '#b3ae9d' : '#fff', fontSize: 12, fontWeight: 800, cursor: page >= totalPages - 1 ? 'default' : 'pointer' }}>
+          翻頁 <Icon name="chevR" size={13} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// 龍舟賽位置計算（邏輯不變）
+// 去程 0→200、200 折返、回程 200→0
+// ============================================================
+function calcRacePos(team) {
+  const out = Math.min(200, Math.max(0, team.outboundScore));
+  if (out < 200) return { pct: out / 200, phase: 'out', label: out === 0 ? '待命' : '衝刺' };
+  if (!team.turnSuccess) return { pct: 1, phase: 'turn', label: '奪旗中' };
+  const inb = Math.min(200, Math.max(0, team.inboundScore));
+  if (inb < 200) return { pct: 1 - inb / 200, phase: 'in', label: '回程' };
+  return { pct: 0, phase: 'done', label: '完賽' };
+}
+
+// ============================================================
+// 河道賽況追蹤器（含第5點需求：每輪事件顯示）
+// ============================================================
+function RiverRaceTracker({ teams, onFlagClick, isDemo, loading }) {
+  const [cheerAnim, setCheerAnim] = useState({});
+  const [collapsed, setCollapsed] = useState(window.innerWidth < 480 && teams.length > 3);
+  const [events, setEvents] = useState([]);
+  const isMobile = window.innerWidth < 640;
+
+  // 監聽事件紀錄（RTDB: raceEvents/{timestamp}）
+  useEffect(() => {
+    if (isDemo) { setEvents(MOCK_RACE_EVENTS); return; }
+    const evRef = ref(rtdb, 'raceEvents');
+    const unsub = onValue(evRef, (snap) => {
+      const v = snap.val() || {};
+      const list = Object.entries(v)
+        .map(([k, e]) => ({ t: Number(k), ...e }))
+        .sort((a, b) => b.t - a.t)
+        .slice(0, 6);
+      setEvents(list);
+    });
+    return () => unsub();
+  }, [isDemo]);
 
   const doCheer = (teamId) => {
-    setCheered(prev => ({ ...prev, [teamId]: true }));
-    setTimeout(() => setCheered(prev => ({ ...prev, [teamId]: false })), 600);
-    const icons = ['🔥', '💖', '💪', '🐲', '✨'];
-    const newP = Array.from({ length: 4 }, (_, i) => ({
-      id: Date.now() + i, icon: icons[Math.floor(Math.random() * icons.length)],
-      x: Math.random() * 80 + 10, y: Math.random() * 40
-    }));
-    setParticles(prev => [...prev, ...newP]);
-    setTimeout(() => setParticles(prev => prev.filter(p => !newP.find(n => n.id === p.id))), 1200);
-    // 寫入 RTDB（試玩/預覽模式不寫入真實資料庫）
+    setCheerAnim(prev => ({ ...prev, [teamId]: Date.now() }));
     if (!isDemo) {
-      const cheerRef = ref(rtdb, `race/${teamId}/cheers`);
-      runTransaction(cheerRef, (current) => (current || 0) + 1).catch(() => {});
+      runTransaction(ref(rtdb, `race/${teamId}/cheers`), (cur) => (Number(cur) || 0) + 1).catch(() => {});
     }
   };
 
-  // 載入中
-  if (loading) {
-    return (
-      <div style={{ height: 140, background: 'linear-gradient(180deg, rgba(13,148,136,0.08), rgba(14,116,144,0.12))', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10 }}>
-        <div style={{ fontSize: 32, animation: 'boatRock 1.2s ease-in-out infinite' }}>🛶</div>
-        <span style={{ fontSize: 11, fontWeight: 700, color: '#0d9488', letterSpacing: 2 }}>賽況載入中...</span>
-        <style>{`@keyframes boatRock { 0%,100%{transform:rotate(-8deg) translateY(0)} 50%{transform:rotate(8deg) translateY(-4px)} }`}</style>
-      </div>
-    );
-  }
+  // 依總進度排序（去程 + 折返成功才算回程）
+  const sorted = [...teams].sort((a, b) => {
+    const sa = Math.min(200, a.outboundScore) + (a.turnSuccess ? 200 + Math.min(200, a.inboundScore) : 0);
+    const sb = Math.min(200, b.outboundScore) + (b.turnSuccess ? 200 + Math.min(200, b.inboundScore) : 0);
+    return sb - sa;
+  });
+  const shown = collapsed ? sorted.slice(0, 3) : sorted;
 
-  // 友善空狀態
-  if (!teams.length) {
-    return (
-      <div style={{ height: 140, background: 'linear-gradient(180deg, rgba(13,148,136,0.08), rgba(14,116,144,0.12))', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, position: 'relative', overflow: 'hidden' }}>
-        <div style={{ position: 'absolute', display: 'flex', gap: 300, animation: 'riverScroll 20s linear infinite', fontSize: 40, opacity: 0.25 }}>🛶🐉🛶🐉</div>
-        <span style={{ fontSize: 28, zIndex: 1 }}>🐉</span>
-        <span style={{ fontSize: 13, fontWeight: 800, color: '#0d9488', zIndex: 1 }}>龍舟賽即將開始</span>
-        <span style={{ fontSize: 10, fontWeight: 600, color: '#94a3b8', zIndex: 1 }}>隊伍報名中，敬請期待！</span>
-      </div>
-    );
-  }
+  if (loading) return (
+    <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 8 }}>
+      <Icon name="boat" size={30} color={C.tealDim} style={{ animation: 'boatRock 1.4s ease-in-out infinite' }} />
+      <p style={{ fontSize: 11, fontWeight: 700, color: '#94a3b8' }}>賽況連線中...</p>
+    </div>
+  );
 
-  const LANE_COLORS = ['#dc2626', '#2563eb', '#16a34a', '#9333ea', '#ea580c', '#0891b2', '#c026d3', '#65a30d'];
+  if (teams.length === 0) return (
+    <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 8, padding: 16, textAlign: 'center' }}>
+      <Icon name="flag" size={30} color={C.tealDim} />
+      <p style={{ fontSize: 12, fontWeight: 800, color: C.teal }}>龍舟賽尚未開始</p>
+      <p style={{ fontSize: 10, color: '#94a3b8' }}>比賽開始後，這裡會即時顯示各隊賽況</p>
+    </div>
+  );
 
   return (
-    <div ref={containerRef} style={{
-      background: 'linear-gradient(180deg, rgba(8,145,178,0.05) 0%, rgba(13,148,136,0.1) 50%, rgba(8,145,178,0.05) 100%)',
-      position: 'relative', overflow: 'hidden',
-      padding: isMobile ? '8px 0' : '12px 0',
-      height: '100%', display: 'flex', flexDirection: 'column'
-    }}>
-      {/* Water pattern */}
-      <div style={{ position: 'absolute', inset: 0, opacity: 0.025,
-        backgroundImage: 'repeating-linear-gradient(90deg, #0d9488 0px, transparent 1px, transparent 24px)',
-        pointerEvents: 'none' }} />
-
-      {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        padding: isMobile ? '0 12px 6px' : '0 20px 10px', position: 'relative', zIndex: 5 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <span style={{ fontSize: isMobile ? 14 : 16 }}>🐉</span>
-          <span style={{ fontSize: isMobile ? 10 : 12, fontWeight: 800, color: '#0d9488', letterSpacing: 2 }}>龍舟爭霸 LIVE</span>
-          <div style={{ width: 6, height: 6, borderRadius: 3, background: '#22c55e', boxShadow: '0 0 6px #22c55e', animation: 'pulse 2s infinite' }} />
+    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', padding: '6px 0 4px' }}>
+      {/* 標題列 */}
+      <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 14px 4px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#dc2626', animation: 'pulse 1.2s infinite' }} />
+          <span style={{ fontSize: 12, fontWeight: 900, letterSpacing: 3, fontFamily: '"Noto Serif TC", serif' }}>龍舟爭霸 LIVE</span>
+          <span style={{ fontSize: 8, fontWeight: 700, color: '#8a9a90', letterSpacing: 2, textTransform: 'uppercase' }}>Dragon Race</span>
         </div>
-        <div style={{ display: 'flex', gap: 8, fontSize: 8, fontWeight: 700, color: '#94a3b8', alignItems: 'center' }}>
-          <span>🔴 200折返</span>
-          <span>🏁 400完賽</span>
-          {isMobile && (
-            <button onClick={() => setCollapsed(c => !c)} style={{ marginLeft: 4, padding: '3px 8px', borderRadius: 8, border: '1px solid rgba(13,148,136,0.2)', background: 'rgba(13,148,136,0.08)', color: '#0d9488', fontSize: 9, fontWeight: 800, cursor: 'pointer' }}>
-              {collapsed ? '展開 ▾' : '收起 ▴'}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontSize: 9, fontWeight: 700, color: '#8a9a90', display: 'flex', alignItems: 'center', gap: 3 }}><Icon name="heart" size={10} color={C.red} />幫喜歡的隊伍打氣</span>
+          {teams.length > 3 && isMobile && (
+            <button onClick={() => setCollapsed(c => !c)} style={{ padding: '3px 9px', clipPath: CUT(5), border: `1px solid ${C.line}`, background: C.paper, fontSize: 9, fontWeight: 800, color: C.ink, cursor: 'pointer' }}>
+              {collapsed ? `顯示全部 ${teams.length} 隊` : '只看前三'}
             </button>
           )}
         </div>
       </div>
 
-      {/* === Race lanes === */}
-      {isMobile && collapsed ? (
-        <div style={{ padding: '0 12px 8px', display: 'flex', flexDirection: 'column', gap: 4 }}>
-          {sorted.slice(0, 3).map((team, idx) => {
-            const total = team.outboundScore + (team.turnSuccess ? team.inboundScore : 0);
-            return (
-              <div key={team.id} style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'rgba(255,255,255,0.6)', borderRadius: 8, padding: '6px 10px' }}>
-                <span style={{ fontSize: 12 }}>{idx === 0 ? '🥇' : idx === 1 ? '🥈' : '🥉'}</span>
-                <span style={{ fontSize: 12, fontWeight: 800, color: '#1e293b', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{team.name}</span>
-                <span style={{ fontSize: 11, fontWeight: 800, fontFamily: 'monospace', color: '#0d9488' }}>{total}/400</span>
-              </div>
-            );
-          })}
-          <p style={{ textAlign: 'center', fontSize: 9, color: '#94a3b8', fontWeight: 600, marginTop: 2 }}>目前領先前三名 ・ 點「展開」看完整賽道</p>
-        </div>
-      ) : (
-      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: isMobile ? 6 : 6, padding: isMobile ? '0 8px' : '0 16px', justifyContent: sorted.length <= 4 ? 'center' : 'flex-start' }}>
-        {sorted.map((team, idx) => {
-          const pos = calcRacePos(team);
-          const isReturning = pos.dir === 'in' || pos.dir === 'finish';
-          const color = team.color || LANE_COLORS[idx % LANE_COLORS.length];
-          const total = team.outboundScore + (team.turnSuccess ? team.inboundScore : 0);
-          const pct = Math.round((total / 400) * 100);
-
-          // ---- 手機版：雙行卡片式 ----
-          if (isMobile) {
-            return (
-              <div key={team.id} style={{
-                background: 'rgba(255,255,255,0.65)', borderRadius: 12,
-                border: '1px solid rgba(255,255,255,0.9)', overflow: 'hidden',
-                boxShadow: '0 1px 4px rgba(0,0,0,0.04)'
-              }}>
-                {/* 上行：排名 + 旗幟 + 隊名 + 分數 + 集氣 */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 8px 2px' }}>
-                  <div style={{
-                    width: 20, height: 20, borderRadius: 6, flexShrink: 0,
-                    background: idx === 0 ? '#fbbf24' : idx === 1 ? '#94a3b8' : idx === 2 ? '#d97706' : '#e2e8f0',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    fontSize: 10, fontWeight: 900, color: idx < 3 ? '#fff' : '#94a3b8'
-                  }}>{idx + 1}</div>
-                  {/* 旗幟 */}
-                  {team.flagImageUrl ? (
-                    <div onClick={(e) => { e.stopPropagation(); onFlagClick?.(team.flagImageUrl); }}
-                      style={{ width: 22, height: 22, borderRadius: 6, flexShrink: 0, overflow: 'hidden', cursor: 'pointer', border: '1.5px solid rgba(0,0,0,0.08)', background: '#fff' }}>
-                      <img src={team.flagImageUrl} alt="旗" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                    </div>
-                  ) : (
-                    <span style={{ fontSize: 14, flexShrink: 0 }}>🚩</span>
-                  )}
-                  <span style={{ fontSize: 12, fontWeight: 800, color: '#1e293b', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {team.name}
-                  </span>
-                  {/* 數字狀態 pill */}
-                  <div style={{
-                    padding: '2px 8px', borderRadius: 8, fontSize: 10, fontWeight: 800, flexShrink: 0,
-                    background: pos.dir === 'finish' ? '#fef3c7' : pos.dir === 'turn' ? '#fef2f2' : `${color}10`,
-                    color: pos.dir === 'finish' ? '#92400e' : pos.dir === 'turn' ? '#dc2626' : color,
-                    border: `1px solid ${pos.dir === 'finish' ? '#fde68a' : pos.dir === 'turn' ? '#fecaca' : color + '25'}`,
-                    fontFamily: 'monospace'
-                  }}>
-                    {total}/400
-                  </div>
-                  <button onClick={() => doCheer(team.id)} style={{
-                    padding: '3px 8px', borderRadius: 8, border: '1px solid #fecdd3', flexShrink: 0,
-                    background: cheered[team.id] ? '#ffe4e6' : '#fff5f5', cursor: 'pointer',
-                    display: 'flex', alignItems: 'center', gap: 3,
-                    transition: 'all 0.2s', transform: cheered[team.id] ? 'scale(1.1)' : 'scale(1)'
-                  }}>
-                    <span style={{ fontSize: 10 }}>💖</span>
-                    <span style={{ fontSize: 9, fontWeight: 800, color: '#e11d48' }}>{team.cheers}</span>
-                  </button>
-                </div>
-                {/* 下行：賽道進度條 */}
-                <div style={{ padding: '2px 8px 6px', position: 'relative' }}>
-                  <div style={{ height: 18, background: 'rgba(241,245,249,0.8)', borderRadius: 6, position: 'relative', overflow: 'hidden' }}>
-                    {/* Fill */}
-                    <div style={{
-                      position: 'absolute', top: 0, bottom: 0, left: 0,
-                      width: `${Math.min(100, pct)}%`,
-                      background: `linear-gradient(90deg, ${color}20, ${color}35)`,
-                      borderRadius: 6, transition: 'width 1s ease-in-out'
-                    }} />
-                    {/* Boat */}
-                    <div style={{
-                      position: 'absolute', top: '50%',
-                      transform: `translateY(-50%) ${isReturning ? 'scaleX(-1)' : ''}`,
-                      left: `calc(${pos.pct}% - 8px)`, transition: 'left 1.2s cubic-bezier(0.16,1,0.3,1)',
-                      fontSize: 14, lineHeight: 1, zIndex: 2, filter: 'drop-shadow(0 1px 1px rgba(0,0,0,0.15))'
-                    }}>🛶</div>
-                    {/* Status tag */}
-                    <div style={{
-                      position: 'absolute', top: '50%', transform: 'translateY(-50%)',
-                      right: 4, fontSize: 8, fontWeight: 800, padding: '1px 5px', borderRadius: 4,
-                      background: pos.dir === 'turn' ? '#ef4444' : pos.dir === 'finish' ? '#fbbf24' : `${color}cc`,
-                      color: '#fff', whiteSpace: 'nowrap',
-                      animation: pos.dir === 'turn' ? 'pulse 1s infinite' : 'none'
-                    }}>{pos.label}</div>
-                    {/* Dice on track (only last 3 on mobile) */}
-                    {team.lastRolls?.length > 0 && (
-                      <div style={{ position: 'absolute', bottom: 1, left: 4, display: 'flex', gap: 1, zIndex: 3 }}>
-                        {team.lastRolls.slice(-3).map((n, i) => (
-                          <div key={i} style={{
-                            width: 12, height: 12, borderRadius: 2, fontSize: 7, fontWeight: 800,
-                            display: 'flex', alignItems: 'center', justifyContent: 'center',
-                            background: n >= 18 ? '#fef3c7' : n <= 3 ? '#fef2f2' : '#f8fafc',
-                            border: `1px solid ${n >= 18 ? '#fbbf24' : n <= 3 ? '#f87171' : '#e2e8f0'}`,
-                            color: n >= 18 ? '#92400e' : n <= 3 ? '#991b1b' : '#64748b'
-                          }}>{n}</div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            );
-          }
-
-          // ---- 桌面版：單行賽道 ----
-          return (
-            <div key={team.id} style={{ display: 'flex', alignItems: 'center', gap: 10, height: 48, position: 'relative', flexShrink: 0 }}>
-              {/* Rank */}
-              <div style={{
-                width: 26, height: 26, borderRadius: 8, flexShrink: 0,
-                background: idx === 0 ? '#fbbf24' : idx === 1 ? '#94a3b8' : idx === 2 ? '#d97706' : '#e2e8f0',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                fontSize: 10, fontWeight: 900, color: idx < 3 ? '#fff' : '#94a3b8'
-              }}>{idx + 1}</div>
-
-              {/* Flag */}
-              {team.flagImageUrl ? (
-                <div onClick={() => onFlagClick?.(team.flagImageUrl)}
-                  style={{ width: 30, height: 30, borderRadius: 8, flexShrink: 0, overflow: 'hidden', cursor: 'pointer', border: '2px solid rgba(0,0,0,0.08)', background: '#fff', transition: 'transform 0.2s' }}
-                  onMouseEnter={e => e.currentTarget.style.transform = 'scale(1.15)'}
-                  onMouseLeave={e => e.currentTarget.style.transform = 'scale(1)'}>
-                  <img src={team.flagImageUrl} alt="旗" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                </div>
-              ) : (
-                <span style={{ fontSize: 18, flexShrink: 0, width: 30, textAlign: 'center' }}>🚩</span>
-              )}
-
-              {/* Team name + score */}
-              <div style={{ width: 110, flexShrink: 0, overflow: 'hidden' }}>
-                <p style={{ fontSize: 12, fontWeight: 800, color: '#334155', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', lineHeight: 1.2 }}>{team.name}</p>
-                <p style={{ fontSize: 10, color: '#94a3b8', fontWeight: 700, fontFamily: 'monospace' }}>{total}/400 ({pct}%)</p>
-              </div>
-
-              {/* Track */}
-              <div style={{ flex: 1, height: 38, background: 'rgba(255,255,255,0.55)', borderRadius: 10, position: 'relative', overflow: 'hidden', border: '1px solid rgba(255,255,255,0.8)' }}>
-                {/* Fill */}
-                <div style={{
-                  position: 'absolute', top: 0, bottom: 0, left: 0,
-                  width: `${Math.min(100, pct)}%`,
-                  background: `linear-gradient(90deg, ${color}15, ${color}30)`,
-                  borderRadius: 8, transition: 'width 1s ease-in-out'
-                }} />
-                {/* Turn marker */}
-                <div style={{ position: 'absolute', top: 0, bottom: 0, right: 0, width: 2, background: '#ef444430' }}>
-                  <div style={{ position: 'absolute', top: -1, right: 4, fontSize: 7, color: '#ef4444', fontWeight: 800 }}>折返</div>
-                </div>
-                {/* Boat */}
-                <div style={{
-                  position: 'absolute', top: '50%',
-                  transform: `translateY(-50%) ${isReturning ? 'scaleX(-1)' : ''}`,
-                  left: `calc(${pos.pct}% - 14px)`, transition: 'left 1.2s cubic-bezier(0.16,1,0.3,1)',
-                  fontSize: 26, lineHeight: 1, zIndex: 2, filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.2))'
-                }}>🛶</div>
-                {/* Status label */}
-                <div style={{
-                  position: 'absolute', top: 2,
-                  left: `calc(${Math.min(pos.pct, 70)}% + 18px)`,
-                  fontSize: 9, fontWeight: 800, padding: '1px 7px', borderRadius: 4,
-                  background: pos.dir === 'turn' ? '#ef4444' : pos.dir === 'finish' ? '#fbbf24' : `${color}cc`,
-                  color: '#fff', whiteSpace: 'nowrap', transition: 'left 1.2s ease-in-out',
-                  animation: pos.dir === 'turn' ? 'pulse 1s infinite' : 'none'
-                }}>{pos.label}</div>
-                {/* Dice */}
-                {team.lastRolls?.length > 0 && (
-                  <div style={{ position: 'absolute', bottom: 2, right: 6, display: 'flex', gap: 2, zIndex: 3 }}>
-                    {team.lastRolls.slice(-5).map((n, i) => (
-                      <div key={i} style={{
-                        width: 17, height: 17, borderRadius: 3, fontSize: 9, fontWeight: 800,
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        background: n >= 18 ? '#fef3c7' : n <= 3 ? '#fef2f2' : '#f8fafc',
-                        border: `1px solid ${n >= 18 ? '#fbbf24' : n <= 3 ? '#f87171' : '#e2e8f0'}`,
-                        color: n >= 18 ? '#92400e' : n <= 3 ? '#991b1b' : '#64748b'
-                      }}>{n}</div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {/* Cheer */}
-              <button onClick={() => doCheer(team.id)} style={{
-                height: 36, borderRadius: 10, border: '1px solid #fecdd3', flexShrink: 0, padding: '0 10px',
-                background: cheered[team.id] ? '#ffe4e6' : '#fff5f5', cursor: 'pointer',
-                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4,
-                transition: 'all 0.2s', transform: cheered[team.id] ? 'scale(1.12)' : 'scale(1)'
-              }}>
-                <span style={{ fontSize: 14 }}>💖</span>
-                <span style={{ fontSize: 10, fontWeight: 800, color: '#e11d48' }}>{team.cheers}</span>
-              </button>
+      {/* 事件跑馬燈 */}
+      {events.length > 0 && (
+        <div style={{ flexShrink: 0, display: 'flex', gap: 6, overflowX: 'auto', padding: '0 14px 6px' }}>
+          {events.map((e, i) => (
+            <div key={e.t + '_' + i} style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 5, padding: '4px 10px', clipPath: CUT(6), background: e.delta >= 0 ? 'rgba(13,148,136,0.08)' : 'rgba(194,65,12,0.08)', border: `1px solid ${e.delta >= 0 ? C.tealDim : 'rgba(194,65,12,0.35)'}`, animation: i === 0 ? 'eventPop 0.5s cubic-bezier(0.16,1,0.3,1)' : 'none' }}>
+              <Icon name={e.icon || 'spark'} size={11} color={e.delta >= 0 ? C.teal : C.red} />
+              <span style={{ fontSize: 9, fontWeight: 800, color: C.ink, whiteSpace: 'nowrap' }}>{e.team}</span>
+              <span style={{ fontSize: 9, fontWeight: 700, color: '#6b7a72', whiteSpace: 'nowrap' }}>{e.name}</span>
+              <span style={{ fontSize: 9, fontWeight: 900, fontFamily: 'monospace', color: e.delta >= 0 ? C.teal : C.red }}>{e.delta >= 0 ? '+' : ''}{e.delta}</span>
             </div>
-          );
-        })}
-      </div>
+          ))}
+        </div>
       )}
 
-      {/* Floating particles */}
-      {particles.map(p => (
-        <div key={p.id} style={{
-          position: 'absolute', top: `${p.y}%`, left: `${p.x}%`, fontSize: 14,
-          pointerEvents: 'none', animation: 'cheerFloat 1s ease-out forwards'
-        }}>{p.icon}</div>
-      ))}
-
-      <style>{`
-        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.5} }
-        @keyframes cheerFloat { 0%{opacity:1;transform:translateY(0)} 100%{opacity:0;transform:translateY(-50px) scale(1.4)} }
-      `}</style>
-    </div>
-  );
-}
-
-// ============================================================
-// 攤位膠囊列 (超緊湊，讓河道佔更多空間)
-// ============================================================
-function BoothPillRow({ booths, stamps, onOpen, side }) {
-  // 每次元件掛載時隨機打亂攤位順序
-  const shuffled = React.useMemo(() => {
-    const arr = [...booths];
-    for (let i = arr.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [arr[i], arr[j]] = [arr[j], arr[i]];
-    }
-    return arr;
-    // 只用 booth id 列表當依賴，數量/成員不變就不重新洗牌（避免刷新統計時順序跳動）
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [booths.map(b => b.id).join(',')]);
-
-  if (!shuffled.length) return null;
-  return (
-    <div style={{
-      flexShrink: 0, zIndex: 10, position: 'relative',
-      padding: side === 'top' ? '8px 12px 4px' : '4px 12px 8px',
-    }}>
-      <div style={{
-        display: 'flex', gap: 10, overflowX: 'auto', paddingBottom: 2,
-        WebkitOverflowScrolling: 'touch', scrollbarWidth: 'none', msOverflowStyle: 'none',
-        justifyContent: 'center',
-      }}>
-        {shuffled.map((booth, i) => {
-          const stamped = stamps.includes(booth.id);
+      {/* 賽道 */}
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '2px 14px 6px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {shown.map((team, idx) => {
+          const pos = calcRacePos(team);
+          const total = Math.min(200, team.outboundScore) + (team.turnSuccess ? Math.min(200, team.inboundScore) : 0);
+          const heading = pos.phase === 'in' || pos.phase === 'done';   // 回程/完賽 → 船頭朝左
           return (
-            <MiniSquareCard key={booth.id} booth={booth} stamped={stamped} onClick={() => onOpen(booth)} delay={i * 70} />
+            <div key={team.id} style={{ position: 'relative', background: C.paper, clipPath: CUT(9), border: `1px solid ${C.line}`, padding: '7px 12px 9px' }}>
+              {/* 隊伍列 */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 5 }}>
+                <span style={{ width: 17, height: 17, clipPath: CUT(4), display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 9, fontWeight: 900, fontFamily: 'monospace', background: idx < 3 ? RANK_COLOR[idx] : '#d5d0bf', color: '#fff', flexShrink: 0 }}>{idx + 1}</span>
+                {team.flagImageUrl ? (
+                  <img src={team.flagImageUrl} alt="" onClick={() => onFlagClick(team.flagImageUrl)}
+                    style={{ width: 20, height: 14, objectFit: 'cover', border: `1px solid ${C.line}`, cursor: 'zoom-in', flexShrink: 0 }} />
+                ) : (
+                  <span style={{ width: 20, height: 14, background: team.color || C.teal, clipPath: 'polygon(0 0, 100% 0, 82% 50%, 100% 100%, 0 100%)', flexShrink: 0 }} />
+                )}
+                <span style={{ fontSize: 12, fontWeight: 900, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{team.name}</span>
+
+                {/* 本輪事件標籤 */}
+                {team.lastEvent && (
+                  <span key={team.lastEvent.name + '_' + (team.lastEvent.t || 0)} style={{ display: 'flex', alignItems: 'center', gap: 3, padding: '2px 7px', clipPath: CUT(4), background: team.lastEvent.delta >= 0 ? 'rgba(13,148,136,0.1)' : 'rgba(194,65,12,0.1)', border: `1px solid ${team.lastEvent.delta >= 0 ? C.tealDim : 'rgba(194,65,12,0.4)'}`, animation: 'eventPop 0.5s cubic-bezier(0.16,1,0.3,1)', flexShrink: 0 }}>
+                    <Icon name={team.lastEvent.icon || 'spark'} size={10} color={team.lastEvent.delta >= 0 ? C.teal : C.red} />
+                    <span style={{ fontSize: 8, fontWeight: 800, color: team.lastEvent.delta >= 0 ? '#0f766e' : '#9a3412', whiteSpace: 'nowrap' }}>{team.lastEvent.name} {team.lastEvent.delta >= 0 ? '+' : ''}{team.lastEvent.delta}</span>
+                  </span>
+                )}
+
+                {/* 骰子 */}
+                {!isMobile && team.lastRolls.length > 0 && (
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 3, flexShrink: 0 }}>
+                    <Icon name="dice" size={11} color="#8a9a90" />
+                    {team.lastRolls.slice(0, 5).map((r, i) => (
+                      <span key={i} style={{ width: 15, height: 15, clipPath: CUT(3), background: r === 20 ? C.goldBg : r === 1 ? '#fde8e0' : '#eee9da', color: r === 20 ? '#8a5a12' : r === 1 ? C.red : '#57534e', fontSize: 8, fontWeight: 900, fontFamily: 'monospace', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{r}</span>
+                    ))}
+                  </span>
+                )}
+
+                <span style={{ fontSize: 9, fontWeight: 800, color: pos.phase === 'done' ? C.gold : pos.phase === 'turn' ? C.red : C.teal, flexShrink: 0, letterSpacing: 1 }}>{pos.label}</span>
+
+                {/* 打氣 */}
+                <button onClick={() => doCheer(team.id)} style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 3, padding: '3px 8px', clipPath: CUT(5), border: '1px solid rgba(194,65,12,0.3)', background: 'rgba(194,65,12,0.05)', cursor: 'pointer', flexShrink: 0 }}>
+                  <Icon name="heart" size={11} color={C.red} />
+                  <span style={{ fontSize: 9, fontWeight: 900, color: C.red, fontFamily: 'monospace' }}>{team.cheers}</span>
+                  {cheerAnim[team.id] && (
+                    <span key={cheerAnim[team.id]} style={{ position: 'absolute', top: -4, right: 4, animation: 'cheerFloat 0.9s ease-out forwards', pointerEvents: 'none' }}>
+                      <Icon name="heart" size={12} color={C.red} />
+                    </span>
+                  )}
+                </button>
+              </div>
+
+              {/* 河道 */}
+              <div style={{ position: 'relative', height: 22, background: 'linear-gradient(180deg, #dcefe9, #cfe8df)', clipPath: CUT(5), border: `1px solid ${C.tealDim}`, overflow: 'hidden' }}>
+                <div style={{ position: 'absolute', inset: 0, opacity: 0.35, backgroundImage: 'repeating-linear-gradient(90deg, transparent 0 18px, rgba(13,148,136,0.25) 18px 19px)' }} />
+                {/* 折返旗 */}
+                <span style={{ position: 'absolute', right: 5, top: '50%', transform: 'translateY(-50%)' }}>
+                  <Icon name="flag" size={12} color={pos.phase === 'turn' ? C.red : '#8a9a90'} />
+                </span>
+                {/* 起/終點線 */}
+                <span style={{ position: 'absolute', left: 3, top: 2, bottom: 2, width: 2, background: 'repeating-linear-gradient(180deg, #123f30 0 3px, transparent 3px 6px)' }} />
+                {/* 龍舟 */}
+                <span style={{ position: 'absolute', top: '50%', left: `calc(6px + ${pos.pct} * (100% - 40px))`, transform: 'translateY(-50%)', transition: 'left 1.2s cubic-bezier(0.34,1.2,0.5,1)' }}>
+                  <span style={{ display: 'inline-block', transform: `scaleX(${heading ? -1 : 1})`, animation: 'boatRock 1.6s ease-in-out infinite' }}>
+                    <Icon name="boat" size={isMobile ? 17 : 21} color={team.color || C.ink} sw={2} />
+                  </span>
+                </span>
+              </div>
+
+              {/* 分數列 */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 3 }}>
+                <span style={{ fontSize: 8, fontWeight: 700, color: '#8a9a90', fontFamily: 'monospace' }}>去程 {Math.min(200, team.outboundScore)}/200{team.turnSuccess ? ` ・ 回程 ${Math.min(200, team.inboundScore)}/200` : ''}</span>
+                <span style={{ fontSize: 8, fontWeight: 900, color: C.ink, fontFamily: 'monospace' }}>TOTAL {total}</span>
+              </div>
+            </div>
           );
         })}
+        {collapsed && sorted.length > 3 && (
+          <p style={{ fontSize: 9, fontWeight: 700, color: '#8a9a90', textAlign: 'center' }}>…還有 {sorted.length - 3} 隊努力划行中</p>
+        )}
       </div>
     </div>
   );
 }
 
-function MiniSquareCard({ booth, stamped, onClick, delay = 0 }) {
-  const [hovered, setHovered] = useState(false);
+// ============================================================
+// 攤位列（上下兩排，切角小卡）
+// ============================================================
+function MiniSquareCard({ booth, stamped, onOpen }) {
   return (
-    <div
-      onClick={onClick}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-      style={{
-        flexShrink: 0, width: 100, cursor: 'pointer', position: 'relative',
-        animation: `fadeSlideUp 0.4s cubic-bezier(0.16,1,0.3,1) ${delay}ms both`,
-      }}
-    >
-      <div style={{
-        width: 100, height: 100, borderRadius: 20, overflow: 'hidden', position: 'relative',
-        background: '#fff',
-        boxShadow: hovered ? '0 8px 24px rgba(0,0,0,0.12)' : '0 2px 8px rgba(0,0,0,0.05)',
-        border: stamped ? '2.5px solid rgba(16,185,129,0.35)' : '2.5px solid #fff',
-        transition: 'all 0.35s cubic-bezier(0.16,1,0.3,1)',
-        transform: hovered ? 'translateY(-4px) scale(1.05)' : 'translateY(0) scale(1)',
-      }}>
-        {booth.facadeImageUrl ? (
-          <img src={booth.facadeImageUrl} alt={booth.name}
-            style={{ width: '100%', height: '100%', objectFit: 'cover', transition: 'transform 0.35s', transform: hovered ? 'scale(1.1)' : 'scale(1)' }}
-            onError={e => { e.target.style.display = 'none'; }} />
-        ) : (
-          <div style={{
-            width: '100%', height: '100%',
-            background: 'linear-gradient(135deg, #ecfdf5, #f0fdf4)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            fontSize: 36, transition: 'transform 0.35s', transform: hovered ? 'scale(1.1)' : 'scale(1)',
-          }}>{booth.emoji}</div>
-        )}
+    <button onClick={() => onOpen(booth)} style={{
+      position: 'relative', width: 100, flexShrink: 0, border: `1px solid ${C.line}`,
+      background: C.paper, clipPath: CUT(12), cursor: 'pointer', padding: 0,
+      textAlign: 'center', overflow: 'hidden',
+    }}>
+      <div style={{ height: 68, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 30, background: 'linear-gradient(160deg, rgba(13,148,136,0.06), rgba(18,63,48,0.03))', overflow: 'hidden', position: 'relative' }}>
+        {booth.facadeImageUrl
+          ? <img src={booth.facadeImageUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={e => { e.target.style.display = 'none'; e.target.parentElement.textContent = booth.emoji || '🏮'; }} />
+          : (booth.emoji || <Icon name="lantern" size={28} color={C.teal} />)}
         {stamped && (
-          <div style={{
-            position: 'absolute', top: 6, right: 6, background: '#10b981', color: '#fff',
-            width: 20, height: 20, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center',
-            fontSize: 10, fontWeight: 900, border: '2px solid #fff', boxShadow: '0 1px 4px rgba(16,185,129,0.3)',
-          }}>✓</div>
+          <span style={{ position: 'absolute', top: 4, right: 4, width: 18, height: 18, clipPath: CUT(4), background: C.teal, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Icon name="check" size={11} color="#fff" sw={2.6} />
+          </span>
         )}
-        {/* 底部名牌 */}
-        <div style={{
-          position: 'absolute', bottom: 0, left: 0, right: 0,
-          background: 'linear-gradient(transparent, rgba(0,0,0,0.55))',
-          padding: '16px 6px 5px', textAlign: 'center',
-        }}>
-          <span style={{
-            fontSize: 10, fontWeight: 800, color: '#fff', letterSpacing: 0.5,
-            textShadow: '0 1px 3px rgba(0,0,0,0.4)',
-            whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'block',
-          }}>{booth.name}</span>
-        </div>
       </div>
-    </div>
+      <div style={{ padding: '5px 6px 7px', borderTop: `1px solid ${C.line}`, background: stamped ? 'rgba(13,148,136,0.06)' : C.paper }}>
+        <p style={{ fontSize: 10, fontWeight: 800, color: C.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{booth.name}</p>
+      </div>
+    </button>
   );
 }
 
-// ============================================================
-// 攤位卡片 (大版，其他頁面可用)
-// ============================================================
-function BoothCard({ booth, isStamped, onClick, delay = 0 }) {
-  const [hovered, setHovered] = useState(false);
+function BoothPillRow({ booths, stamps, onOpen, side }) {
+  // 以攤位 id 做穩定的偽隨機排序（每次載入順序一致、不需 useMemo）
+  const shuffled = [...booths].sort((a, b) => {
+    const h = (s) => { let x = 0; for (let i = 0; i < s.length; i++) x = (x * 31 + s.charCodeAt(i)) % 9973; return x; };
+    return h(String(a.id)) - h(String(b.id));
+  });
+  if (shuffled.length === 0) return null;
   return (
-    <div onClick={onClick} onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}
-      style={{ flexShrink: 0, width: 160, cursor: 'pointer', position: 'relative', animation: `fadeSlideUp 0.5s cubic-bezier(0.16,1,0.3,1) ${delay}ms both` }}>
-      <div style={{ width: '100%', aspectRatio: '1', borderRadius: 28, overflow: 'hidden', position: 'relative', background: '#fff', boxShadow: hovered ? '0 16px 40px rgba(0,0,0,0.12)' : '0 4px 16px rgba(0,0,0,0.06)', border: '3px solid #fff', transition: 'all 0.4s cubic-bezier(0.16,1,0.3,1)', transform: hovered ? 'translateY(-8px) scale(1.03)' : 'translateY(0) scale(1)' }}>
-        {booth.facadeImageUrl ? (
-          <img src={booth.facadeImageUrl} style={{ width: '100%', height: '100%', objectFit: 'cover', transition: 'transform 0.4s', transform: hovered ? 'scale(1.15)' : 'scale(1)' }} onError={e => { e.target.style.display = 'none'; }} />
-        ) : (
-          <div style={{ width: '100%', height: '100%', background: 'linear-gradient(135deg, #ecfdf5, #f0fdf4)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 56, transition: 'transform 0.4s', transform: hovered ? 'scale(1.15)' : 'scale(1)' }}>{booth.emoji}</div>
-        )}
-        {isStamped && (<div style={{ position: 'absolute', top: 10, right: 10, background: '#dc2626', color: '#fff', width: 28, height: 28, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 900, border: '2px solid #fff', boxShadow: '0 2px 8px rgba(220,38,38,0.3)' }}>✓</div>)}
-      </div>
-      <div style={{ position: 'absolute', bottom: -10, left: '50%', transform: 'translateX(-50%)', background: '#0f172a', color: '#fff', padding: '6px 16px', borderRadius: 12, whiteSpace: 'nowrap', fontWeight: 800, fontSize: 11, letterSpacing: 1, boxShadow: '0 4px 12px rgba(0,0,0,0.15)', zIndex: 10 }}>{booth.name}</div>
+    <div style={{ flexShrink: 0, padding: side === 'top' ? '10px 12px 8px' : '8px 12px 10px', display: 'flex', gap: 9, overflowX: 'auto', zIndex: 6, position: 'relative' }}>
+      {shuffled.map(b => <MiniSquareCard key={b.id} booth={b} stamped={stamps.includes(b.id)} onOpen={onOpen} />)}
     </div>
   );
 }
 
 // ============================================================
-// 集章名單 (從 API 載入)
+// 集章名單
 // ============================================================
 function CollectorsList({ collectors, currentUser, isStamped }) {
-  const [expanded, setExpanded] = useState(false);
-  // collectors 可能是字串陣列（使用者名稱）或物件陣列，統一轉成物件
-  const normalized = (Array.isArray(collectors) ? collectors : []).map(c =>
-    typeof c === 'string' ? { username: c, timestamp: '' } : { username: c.username || '', timestamp: c.timestamp || '' }
-  );
-  const allCollectors = [...normalized];
-  if (isStamped && !allCollectors.find(c => c.username === currentUser)) {
-    allCollectors.unshift({ username: currentUser, timestamp: '剛剛', isMe: true });
-  }
-  const list = allCollectors.map(c => ({ ...c, isMe: c.username === currentUser }));
-  const shown = expanded ? list : list.slice(0, 3);
-  const remaining = list.length - 3;
-  if (list.length === 0) return null;
-
+  const list = [...new Set(collectors)];
+  const meIn = list.includes(currentUser);
+  const display = isStamped && !meIn ? [currentUser, ...list] : list;   // 樂觀顯示自己
+  if (display.length === 0) return null;
   return (
-    <div style={{ marginTop: 24, animation: 'fadeSlideUp 0.4s ease-out' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <p style={{ fontSize: 10, fontWeight: 800, color: '#94a3b8', letterSpacing: 2, textTransform: 'uppercase' }}>集章名單</p>
-          <span style={{ fontSize: 10, fontWeight: 800, color: '#0d9488', background: 'rgba(13,148,136,0.08)', padding: '3px 10px', borderRadius: 10 }}>{list.length} 人</span>
-        </div>
-      </div>
-      <div style={{ background: '#fafaf9', borderRadius: 20, border: '1px solid rgba(0,0,0,0.04)', overflow: 'hidden' }}>
-        {shown.map((c, idx) => (
-          <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', borderBottom: idx < shown.length - 1 ? '1px solid rgba(0,0,0,0.04)' : 'none', background: c.isMe ? 'rgba(251,191,36,0.06)' : 'transparent' }}>
-            <div style={{ width: 36, height: 36, borderRadius: 12, flexShrink: 0, background: c.isMe ? 'linear-gradient(135deg, #fbbf24, #f59e0b)' : getAvatarColor(c.username || '?'), display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 800, color: '#fff', border: c.isMe ? '2px solid rgba(251,191,36,0.3)' : 'none' }}>{(c.username || '?').charAt(0)}</div>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <span style={{ fontSize: 13, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.username}</span>
-                {c.isMe && <span style={{ fontSize: 8, fontWeight: 800, color: '#92400e', background: '#fef3c7', padding: '2px 8px', borderRadius: 6, letterSpacing: 1, flexShrink: 0 }}>YOU</span>}
-              </div>
-              {c.timestamp && <p style={{ fontSize: 10, color: '#94a3b8', fontWeight: 600, marginTop: 1 }}>🕐 {c.timestamp}</p>}
-            </div>
-            <div style={{ width: 28, height: 28, borderRadius: 8, flexShrink: 0, background: 'rgba(220,38,38,0.06)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14 }}>🔖</div>
-          </div>
+    <div style={{ position: 'relative', marginTop: 20, padding: '18px 20px', background: C.paper, clipPath: CUT(12), border: `1px solid ${C.line}` }}>
+      <p style={{ fontSize: 10, fontWeight: 800, color: '#8a9a90', letterSpacing: 3, textTransform: 'uppercase', marginBottom: 12 }}>／ 已集章的旅人（{display.length}）</p>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+        {display.map((name, i) => (
+          <span key={name + i} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '4px 10px', clipPath: CUT(5), background: name === currentUser ? 'rgba(13,148,136,0.1)' : '#f3efe2', border: `1px solid ${name === currentUser ? C.tealDim : 'transparent'}` }}>
+            <span style={{ width: 16, height: 16, borderRadius: '50%', background: getAvatarColor(name), color: '#fff', fontSize: 8, fontWeight: 900, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{String(name).slice(0, 1)}</span>
+            <span style={{ fontSize: 10, fontWeight: 700, color: name === currentUser ? C.teal : '#57534e' }}>{name}{name === currentUser ? '（你）' : ''}</span>
+          </span>
         ))}
-        {list.length > 3 && (
-          <button onClick={() => setExpanded(!expanded)} style={{ width: '100%', padding: '12px 16px', border: 'none', borderTop: '1px solid rgba(0,0,0,0.04)', background: 'transparent', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, fontSize: 11, fontWeight: 700, color: '#0d9488' }}>
-            {expanded ? '收合名單 ↑' : `查看其餘 ${remaining} 位 ↓`}
-          </button>
-        )}
       </div>
     </div>
   );
 }
 
 // ============================================================
-// 排行榜 (從 API 載入)
+// 排行榜（第4點需求：同章數並列名次）
+// 名次採「競賽排名」：3人並列第1 → 下一位是第4名
 // ============================================================
 function Leaderboard({ booths, leaderboard, currentUser, currentUserStamps, onRefresh, isDemo }) {
-  const [hoveredRow, setHoveredRow] = useState(null);
+  const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => { if (!isDemo) onRefresh(); }, []);
 
-  const boothCount = booths.length || 1;
-  const safeStamps = Array.isArray(currentUserStamps) ? currentUserStamps : [];
-  let players = (Array.isArray(leaderboard) ? leaderboard : []).map(p => ({
-    ...p,
-    stamps: Array.isArray(p.stamps) ? p.stamps : [],
-  }));
-  const existingIdx = players.findIndex(p => p.username === currentUser);
-  if (existingIdx >= 0) {
-    players[existingIdx] = { ...players[existingIdx], stamps: safeStamps, isMe: true };
-  } else {
-    players.push({ username: currentUser, stamps: safeStamps, isMe: true });
-  }
-  players.sort((a, b) => b.stamps.length - a.stamps.length || a.username.localeCompare(b.username));
-  players = players.map(p => ({ ...p, isMe: p.username === currentUser }));
-  const myRank = players.findIndex(p => p.isMe) + 1;
-  const myStampCount = safeStamps.length;
+  const handleRefresh = async () => {
+    if (refreshing || isDemo) return;
+    setRefreshing(true);
+    await onRefresh();
+    setTimeout(() => setRefreshing(false), 800);
+  };
+
+  // 試玩模式給假資料
+  const source = isDemo ? [
+    { username: '慶典達人', stamps: ['a', 'b', 'c', 'd', 'e'] },
+    { username: '龍舟粉絲', stamps: ['a', 'b', 'c'] },
+    { username: '愛吃粽子', stamps: ['a', 'b', 'c'] },
+    { username: currentUser, stamps: currentUserStamps },
+    { username: '路過旅人', stamps: ['a'] },
+  ].sort((a, b) => b.stamps.length - a.stamps.length) : leaderboard;
+
+  // ★ 並列名次計算
+  const ranked = [];
+  let prevCount = null, prevRank = 0;
+  source.forEach((p, i) => {
+    const n = p.stamps.length;
+    const rank = (n === prevCount) ? prevRank : i + 1;
+    prevCount = n; prevRank = rank;
+    ranked.push({ ...p, rank });
+  });
+  const rankSize = ranked.reduce((m, p) => { m[p.rank] = (m[p.rank] || 0) + 1; return m; }, {});
+
+  const me = ranked.find(p => p.username === currentUser);
+  const better = me ? ranked.find(p => p.rank < me.rank) : null;   // 最近一個名次比我高的
+  const gap = me && better ? better.stamps.length - me.stamps.length : 0;
+
+  const medalColor = (rank) => rank <= 3 ? RANK_COLOR[rank - 1] : null;
 
   return (
-    <div style={{ animation: 'fadeSlideUp 0.6s ease-out 0.2s both' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <h3 style={{ fontSize: 20, fontWeight: 900, fontFamily: '"Noto Serif TC", serif', letterSpacing: 1 }}>🏆 排行榜</h3>
-          <span style={{ fontSize: 10, fontWeight: 700, color: '#94a3b8', background: '#f1f5f9', padding: '4px 10px', borderRadius: 8 }}>共 {players.length} 位</span>
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Icon name="trophy" size={17} color={C.gold} />
+          <h3 style={{ fontSize: 16, fontWeight: 900, fontFamily: '"Noto Serif TC", serif', letterSpacing: 2 }}>集章排行榜</h3>
+          <span style={{ fontSize: 8, fontWeight: 800, color: '#8a9a90', letterSpacing: 2, textTransform: 'uppercase' }}>Ranking</span>
         </div>
-        <button onClick={onRefresh} style={{ fontSize: 10, fontWeight: 700, color: '#0d9488', background: 'rgba(13,148,136,0.08)', padding: '6px 14px', borderRadius: 10, border: 'none', cursor: 'pointer' }}>↻ 重整</button>
+        {!isDemo && (
+          <button onClick={handleRefresh} disabled={refreshing} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '5px 12px', clipPath: CUT(6), background: refreshing ? '#eee9da' : C.paper, border: `1px solid ${C.line}`, fontSize: 10, fontWeight: 700, color: '#4b5f56', cursor: refreshing ? 'wait' : 'pointer' }}>
+            <span style={{ display: 'inline-block', transition: 'transform 0.6s', transform: refreshing ? 'rotate(360deg)' : 'none' }}><Icon name="refresh" size={11} /></span>
+            {refreshing ? '更新中' : '刷新'}
+          </button>
+        )}
       </div>
 
-      {/* 我的名次 置頂卡片 */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 18px', marginBottom: 16, borderRadius: 18, background: 'linear-gradient(135deg, #134e3a, #0d9488)', boxShadow: '0 6px 20px rgba(13,148,136,0.25)' }}>
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: 48 }}>
-          <span style={{ fontSize: 9, fontWeight: 700, color: 'rgba(255,255,255,0.6)', letterSpacing: 1 }}>我的名次</span>
-          <span style={{ fontSize: 26, fontWeight: 900, color: '#fff', fontFamily: 'monospace', lineHeight: 1 }}>{myRank > 0 ? `#${myRank}` : '-'}</span>
+      {/* 我的名次 */}
+      {me && (
+        <div style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 12, padding: '13px 16px', background: 'rgba(13,148,136,0.06)', clipPath: CUT(10), border: `1px solid ${C.tealDim}`, marginBottom: 12 }}>
+          <Corners size={8} inset={4} />
+          <span style={{ width: 36, height: 36, clipPath: CUT(8), background: medalColor(me.rank) || C.ink, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 900, fontFamily: 'monospace', flexShrink: 0 }}>{me.rank}</span>
+          <div style={{ flex: 1 }}>
+            <p style={{ fontSize: 12, fontWeight: 900, display: 'flex', alignItems: 'center', gap: 6 }}>
+              我的名次：第 {me.rank} 名
+              {rankSize[me.rank] > 1 && <span style={{ fontSize: 8, fontWeight: 800, padding: '1px 6px', clipPath: CUT(3), background: C.goldBg, color: '#8a5a12', border: '1px solid rgba(183,121,31,0.3)' }}>並列 ×{rankSize[me.rank]}</span>}
+            </p>
+            <p style={{ fontSize: 10, fontWeight: 700, color: '#6b7a72', marginTop: 2 }}>
+              {me.rank === 1 ? '你目前領先全場！' : gap > 0 ? `再收集 ${gap} 個章就能追上前一名` : '與前一名同章數，衝一個章就超車！'}
+            </p>
+          </div>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
+            <Icon name="stamp" size={13} color={C.teal} />
+            <span style={{ fontSize: 14, fontWeight: 900, fontFamily: 'monospace', color: C.teal }}>{me.stamps.length}</span>
+          </span>
         </div>
-        <div style={{ width: 1, height: 32, background: 'rgba(255,255,255,0.15)' }} />
-        <div style={{ flex: 1 }}>
-          <p style={{ fontSize: 13, fontWeight: 800, color: '#fff' }}>{currentUser}</p>
-          <p style={{ fontSize: 10, color: 'rgba(255,255,255,0.7)', fontWeight: 600, marginTop: 2 }}>
-            已集 {myStampCount}/{booths.length} 章
-            {myRank === 1 && myStampCount > 0 && ' ・ 目前第一名！🎉'}
-            {myRank > 1 && players[myRank - 2] && ` ・ 距前一名差 ${players[myRank - 2].stamps.length - myStampCount} 章`}
-          </p>
-        </div>
-        <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', maxWidth: 80, justifyContent: 'flex-end' }}>
-          {booths.map((b, i) => (<div key={i} style={{ width: 9, height: 9, borderRadius: '50%', background: safeStamps.includes(b.id) ? '#fbbf24' : 'rgba(255,255,255,0.2)' }} title={b.name} />))}
-        </div>
-      </div>
+      )}
 
-      {/* Podium */}
-      <div style={{ display: 'flex', gap: 10, marginBottom: 16, justifyContent: 'center', alignItems: 'flex-end' }}>
-        {[1, 0, 2].map(rankIdx => {
-          const player = players[rankIdx];
-          if (!player) return null;
-          const rs = RANK_STYLES[rankIdx];
-          const isCenter = rankIdx === 0;
+      {/* 名單 */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {ranked.length === 0 && <p style={{ fontSize: 11, color: '#8a9a90', textAlign: 'center', padding: '16px 0' }}>還沒有人上榜，快去集章搶頭香！</p>}
+        {ranked.slice(0, 30).map((p) => {
+          const isMe = p.username === currentUser;
+          const mc = medalColor(p.rank);
           return (
-            <div key={rankIdx} style={{ flex: isCenter ? '0 0 40%' : '0 0 28%', background: rs.bg, borderRadius: 24, padding: isCenter ? '20px 12px 16px' : '16px 10px 14px', border: `2px solid ${rs.border}30`, boxShadow: `0 4px 20px ${rs.glow}`, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, transform: isCenter ? 'scale(1)' : 'scale(0.92)', animation: `fadeSlideUp 0.5s ease-out ${rankIdx * 0.1 + 0.3}s both` }}>
-              <span style={{ fontSize: isCenter ? 28 : 22 }}>{rs.medal}</span>
-              <div style={{ width: isCenter ? 52 : 40, height: isCenter ? 52 : 40, borderRadius: '50%', background: player.isMe ? 'linear-gradient(135deg, #fbbf24, #f59e0b)' : getAvatarColor(player.username), display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: isCenter ? 20 : 16, fontWeight: 800, color: '#fff', border: `3px solid ${player.isMe ? '#fbbf24' : '#fff'}`, boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}>{player.username.charAt(0)}</div>
-              <div style={{ textAlign: 'center' }}>
-                <p style={{ fontSize: isCenter ? 12 : 10, fontWeight: 800, lineHeight: 1.2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: isCenter ? 120 : 80 }}>{player.username}</p>
-                {player.isMe && <span style={{ fontSize: 7, fontWeight: 800, color: '#92400e', background: 'rgba(251,191,36,0.3)', padding: '1px 6px', borderRadius: 4, letterSpacing: 1, marginTop: 2, display: 'inline-block' }}>YOU</span>}
-              </div>
-              <div style={{ display: 'flex', gap: 3, marginTop: 2 }}>
-                {booths.map((b, i) => (<div key={i} style={{ width: isCenter ? 10 : 8, height: isCenter ? 10 : 8, borderRadius: '50%', background: player.stamps.includes(b.id) ? '#0d9488' : 'rgba(0,0,0,0.08)', boxShadow: player.stamps.includes(b.id) ? `0 1px 4px #0d948840` : 'none' }} title={b.name} />))}
-              </div>
-              <p style={{ fontSize: 10, fontWeight: 900, color: '#334155', fontFamily: 'monospace' }}>{player.stamps.length}/{booths.length}</p>
+            <div key={p.username} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 14px', background: isMe ? 'rgba(13,148,136,0.06)' : C.paper, clipPath: CUT(8), border: `1px solid ${isMe ? C.tealDim : C.line}` }}>
+              {mc ? (
+                <span style={{ width: 24, display: 'flex', justifyContent: 'center', flexShrink: 0 }}><Icon name="medal" size={19} color={mc} sw={2} /></span>
+              ) : (
+                <span style={{ width: 24, textAlign: 'center', fontSize: 11, fontWeight: 900, fontFamily: 'monospace', color: '#8a9a90', flexShrink: 0 }}>{p.rank}</span>
+              )}
+              <span style={{ width: 24, height: 24, borderRadius: '50%', background: getAvatarColor(p.username), color: '#fff', fontSize: 10, fontWeight: 900, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>{String(p.username).slice(0, 1)}</span>
+              <span style={{ flex: 1, fontSize: 12, fontWeight: isMe ? 900 : 700, color: isMe ? C.teal : C.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 6 }}>
+                {p.username}{isMe ? '（你）' : ''}
+                {rankSize[p.rank] > 1 && <span style={{ fontSize: 8, fontWeight: 800, padding: '1px 6px', clipPath: CUT(3), background: '#f3efe2', color: '#8a9a90', flexShrink: 0 }}>並列</span>}
+              </span>
+              {/* 章數進度條 */}
+              <span style={{ width: 54, height: 4, background: '#ece8d9', flexShrink: 0, position: 'relative' }}>
+                <span style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: `${(p.stamps.length / (booths.length || 1)) * 100}%`, background: mc || C.teal }} />
+              </span>
+              <span style={{ fontSize: 12, fontWeight: 900, fontFamily: 'monospace', color: mc || C.ink, width: 22, textAlign: 'right', flexShrink: 0 }}>{p.stamps.length}</span>
             </div>
           );
         })}
       </div>
-
-      {/* Full list */}
-      <div style={{ background: '#fff', borderRadius: 24, boxShadow: '0 4px 16px rgba(0,0,0,0.03)', border: '1px solid rgba(0,0,0,0.04)', overflow: 'hidden' }}>
-        <div style={{ display: 'flex', alignItems: 'center', padding: '14px 20px', borderBottom: '1px solid rgba(0,0,0,0.06)', background: '#fafaf9' }}>
-          <span style={{ width: 36, fontSize: 9, fontWeight: 800, color: '#94a3b8', letterSpacing: 1 }}>#</span>
-          <span style={{ flex: 1, fontSize: 9, fontWeight: 800, color: '#94a3b8', letterSpacing: 1 }}>玩家</span>
-          <span style={{ width: 80, fontSize: 9, fontWeight: 800, color: '#94a3b8', letterSpacing: 1, textAlign: 'center' }}>集章</span>
-          <span style={{ width: 60, fontSize: 9, fontWeight: 800, color: '#94a3b8', letterSpacing: 1, textAlign: 'right' }}>進度</span>
-        </div>
-        {players.map((player, idx) => {
-          const rank = idx + 1;
-          const pct = Math.round((player.stamps.length / boothCount) * 100);
-          return (
-            <div key={idx} onMouseEnter={() => setHoveredRow(idx)} onMouseLeave={() => setHoveredRow(null)}
-              style={{ display: 'flex', alignItems: 'center', padding: '14px 20px', borderBottom: idx < players.length - 1 ? '1px solid rgba(0,0,0,0.04)' : 'none', background: player.isMe ? 'rgba(251,191,36,0.06)' : hoveredRow === idx ? 'rgba(0,0,0,0.01)' : 'transparent', transition: 'all 0.2s', animation: `fadeSlideUp 0.3s ease-out ${idx * 0.04}s both` }}>
-              <div style={{ width: 36, flexShrink: 0 }}>{rank <= 3 ? <span style={{ fontSize: 16 }}>{RANK_STYLES[rank - 1].medal}</span> : <span style={{ fontSize: 13, fontWeight: 900, color: '#cbd5e1', fontFamily: 'monospace' }}>{rank}</span>}</div>
-              <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
-                <div style={{ width: 32, height: 32, borderRadius: 10, flexShrink: 0, background: player.isMe ? 'linear-gradient(135deg, #fbbf24, #f59e0b)' : getAvatarColor(player.username), display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 800, color: '#fff', border: player.isMe ? '2px solid rgba(251,191,36,0.3)' : 'none' }}>{player.username.charAt(0)}</div>
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                    <span style={{ fontSize: 13, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{player.username}</span>
-                    {player.isMe && <span style={{ fontSize: 7, fontWeight: 800, color: '#92400e', background: '#fef3c7', padding: '2px 7px', borderRadius: 5, letterSpacing: 1, flexShrink: 0 }}>YOU</span>}
-                  </div>
-                </div>
-              </div>
-              <div style={{ width: 80, display: 'flex', justifyContent: 'center', gap: 4, flexShrink: 0 }}>
-                {booths.map((b, i) => (<div key={i} style={{ width: 10, height: 10, borderRadius: '50%', background: player.stamps.includes(b.id) ? '#0d9488' : '#f1f5f9', border: player.stamps.includes(b.id) ? `1px solid #0d948830` : '1px solid rgba(0,0,0,0.04)', boxShadow: player.stamps.includes(b.id) ? `0 1px 4px #0d948830` : 'none' }} title={b.name} />))}
-              </div>
-              <div style={{ width: 60, textAlign: 'right', flexShrink: 0 }}>
-                <span style={{ fontSize: 12, fontWeight: 900, fontFamily: 'monospace', color: pct === 100 ? '#f59e0b' : pct >= 50 ? '#0d9488' : '#94a3b8' }}>{pct === 100 ? '✦ ' : ''}{pct}%</span>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-      <p style={{ textAlign: 'center', fontSize: 9, color: '#cbd5e1', fontWeight: 600, marginTop: 16, letterSpacing: 1 }}>點「重整」更新最新排名</p>
+      {isDemo && <p style={{ fontSize: 9, color: '#b3ae9d', textAlign: 'center', marginTop: 10 }}>（試玩模式顯示的是示範名單）</p>}
     </div>
   );
 }
 
 // ============================================================
-// 管理員後台
+// 管理員後台（內部工具，維持深色；賽事分頁新增「每輪事件」控制）
 // ============================================================
 function AdminPanel({ adminUser, onLogout, db, rtdb }) {
   const [tab, setTab] = useState('dashboard');
-  const [stats, setStats] = useState({ booths: 0, players: 0, stamps: 0, sales: 0 });
-  const [players, setPlayers] = useState([]);
-  const [boothsList, setBoothsList] = useState([]);
-  const [raceData, setRaceData] = useState({});
-  const [settings, setSettings] = useState({ registrationOpen: true, registrationClosedMsg: '' });
-  const [rollsInput, setRollsInput] = useState({});
   const [msg, setMsg] = useState(null);
-  // 攤位編輯
-  const [editBooth, setEditBooth] = useState(null);
-  const [editItems, setEditItems] = useState([]);
-  // 龍舟編輯
-  const [newTeam, setNewTeam] = useState({ name: '', color: '#dc2626', flagImageUrl: '' });
-  // 玩家批次建立
-  const [batchNames, setBatchNames] = useState('');
-  const [batchPin, setBatchPin] = useState('1234');
-  const [batchCoins, setBatchCoins] = useState(500);
+  const [boothList, setBoothList] = useState([]);
+  const [playerList, setPlayerList] = useState([]);
+  const [settings, setSettings] = useState({ registrationOpen: true, registrationClosedMsg: '' });
+  const [teams, setTeams] = useState([]);
+  const [editing, setEditing] = useState(null);        // 編輯中的攤位
+  const [busy, setBusy] = useState(false);
 
-  const showAdminMsg = (text) => { setMsg(text); setTimeout(() => setMsg(null), 3000); };
+  // 賽事控制狀態
+  const [rollsInput, setRollsInput] = useState({});    // {teamId: '15,20,3'}
+  const [eventSel, setEventSel] = useState({});        // {teamId: '' | preset id | 'custom'}
+  const [customEvent, setCustomEvent] = useState({});  // {teamId: {name, delta}}
+  const [newTeam, setNewTeam] = useState({ name: '', color: '#0d9488', flagImageUrl: '' });
+  const [coinInput, setCoinInput] = useState({});      // {username: '100'}
 
-  const inputStyle = { width: '100%', boxSizing: 'border-box', padding: '10px 12px', background: '#374151', border: '1px solid #4b5563', borderRadius: 8, color: '#e2e8f0', fontSize: 13, outline: 'none' };
-  const btnPrimary = { padding: '8px 20px', borderRadius: 8, border: 'none', background: '#3b82f6', color: '#fff', fontSize: 12, fontWeight: 700, cursor: 'pointer' };
-  const btnDanger = { ...btnPrimary, background: '#7f1d1d', color: '#fca5a5' };
-  const btnGhost = { padding: '4px 10px', borderRadius: 6, border: '1px solid #374151', background: 'transparent', color: '#60a5fa', fontSize: 10, cursor: 'pointer', fontWeight: 700 };
-  const cardStyle = { background: '#1f2937', borderRadius: 12, padding: 16, marginBottom: 8, border: '1px solid #374151' };
-  const labelStyle = { fontSize: 11, fontWeight: 700, color: '#9ca3af', display: 'block', marginBottom: 4, marginTop: 12 };
+  const toast = (text, type = 'ok') => { setMsg({ text, type }); setTimeout(() => setMsg(null), 2600); };
 
-  // === 載入所有資料 ===
-  const loadAll = async () => {
+  const loadAll = useCallback(async () => {
     try {
-      const [boothSnap, playerSnap, stampSnap, settingsSnap] = await Promise.all([
-        getDocs(collection(db, 'booths')),
-        getDocs(collection(db, 'players')),
-        getDocs(collection(db, 'stampLogs')),
-        getDoc(doc(db, 'settings', 'general'))
-      ]);
-      let totalSales = 0;
-      playerSnap.docs.forEach(d => {
-        (d.data().inventory || []).forEach(item => { totalSales += Number(item.price) || 0; });
-      });
-      setStats({ booths: boothSnap.size, players: playerSnap.size, stamps: stampSnap.size, sales: totalSales });
-      setPlayers(playerSnap.docs.map(d => ({ username: d.id, ...d.data() })));
-      // 攤位含商品
-      const bList = [];
-      for (const bd of boothSnap.docs) {
-        const itemSnap = await getDocs(collection(db, 'booths', bd.id, 'items'));
-        bList.push({ id: bd.id, ...bd.data(), items: itemSnap.docs.map(d => ({ id: d.id, ...d.data() })) });
+      const bs = await getDocs(collection(db, 'booths'));
+      const arr = [];
+      for (const d of bs.docs) {
+        const items = (await getDocs(collection(db, 'booths', d.id, 'items'))).docs.map(x => ({ id: x.id, ...x.data() }));
+        arr.push({ id: d.id, ...d.data(), items });
       }
-      setBoothsList(bList);
-      // 設定（自動建立）
-      if (settingsSnap.exists()) {
-        setSettings(settingsSnap.data());
-      } else {
-        const defaultSettings = { registrationOpen: true, registrationClosedMsg: '目前尚未開放新玩家登記' };
-        await setDoc(doc(db, 'settings', 'general'), defaultSettings);
-        setSettings(defaultSettings);
-      }
-    } catch (err) { console.error('載入失敗:', err); }
-  };
+      setBoothList(arr);
+      const ps = await getDocs(collection(db, 'players'));
+      setPlayerList(ps.docs.map(d => ({ username: d.id, ...d.data() })));
+      const st = await getDoc(doc(db, 'settings', 'general'));
+      if (st.exists()) setSettings({ registrationOpen: st.data().registrationOpen !== false, registrationClosedMsg: st.data().registrationClosedMsg || '' });
+    } catch (e) { toast('資料載入失敗：' + e.message, 'err'); }
+  }, [db]);
 
-  useEffect(() => { loadAll(); }, [db]);
+  useEffect(() => { loadAll(); }, [loadAll]);
 
-  // 即時監聽龍舟
+  // 龍舟隊伍即時同步
   useEffect(() => {
-    const unsub = onValue(ref(rtdb, 'race'), (snap) => setRaceData(snap.val() || {}));
+    const unsub = onValue(ref(rtdb, 'race'), (snap) => {
+      const v = snap.val() || {};
+      setTeams(Object.entries(v).map(([k, t]) => ({
+        id: k, name: t.name || '', color: t.color || '#0d9488', flagImageUrl: t.flagImageUrl || '',
+        outboundScore: Number(t.outboundScore) || 0, inboundScore: Number(t.inboundScore) || 0,
+        turnSuccess: t.turnSuccess === true || t.turnSuccess === 'true',
+        cheers: Number(t.cheers) || 0, lastRolls: t.lastRolls || '', lastEvent: t.lastEvent || null,
+      })));
+    });
     return () => unsub();
   }, [rtdb]);
 
-  // === 龍舟操作 ===
-  const processTeamRolls = async (teamId) => {
-    const team = raceData[teamId];
-    const input = rollsInput[teamId] || '';
-    if (!input.trim()) return showAdminMsg('請先輸入骰數');
-    const rolls = input.split(',').map(n => parseInt(n)).filter(n => !isNaN(n));
-    const rollSum = rolls.reduce((a, b) => a + b, 0);
-    if (rollSum === 0) return showAdminMsg('骰數總和為 0');
-    let outbound = Number(team.outboundScore) || 0;
-    let inbound = Number(team.inboundScore) || 0;
-    let turned = team.turnSuccess === true;
-    let note = '';
-    if (outbound >= 200 && inbound >= 200) return showAdminMsg('此隊已完賽');
-    if (!turned) {
-      outbound += rollSum;
-      if (outbound >= 200) { const ov = outbound - 200; outbound = 200; turned = true; note = '🚩 折返！'; if (ov > 0) { inbound += ov; if (inbound >= 200) { inbound = 200; note += ' 🏆 完賽！'; } } }
-    } else { inbound += rollSum; if (inbound >= 200) { inbound = 200; note = '🏆 完賽！'; } }
-    try {
-      await rtdbSet(ref(rtdb, `race/${teamId}`), { ...team, outboundScore: outbound, inboundScore: inbound, turnSuccess: turned, lastRolls: input });
-      setRollsInput(prev => ({ ...prev, [teamId]: '' }));
-      showAdminMsg(`${team.name}：+${rollSum} ${note || '已更新'}`);
-    } catch (err) { showAdminMsg('更新失敗：' + err.message); }
-  };
-
-  const addTeam = async () => {
-    if (!newTeam.name.trim()) return showAdminMsg('請輸入隊伍名稱');
-    const teamId = 'team-' + Date.now();
-    try {
-      await rtdbSet(ref(rtdb, `race/${teamId}`), {
-        name: newTeam.name.trim(), color: newTeam.color, flagImageUrl: newTeam.flagImageUrl || '',
-        outboundScore: 0, inboundScore: 0, turnSuccess: false, cheers: 0, lastRolls: ''
-      });
-      setNewTeam({ name: '', color: '#dc2626', flagImageUrl: '' });
-      showAdminMsg(`✅ 已新增隊伍「${newTeam.name}」`);
-    } catch (err) { showAdminMsg('新增失敗：' + err.message); }
-  };
-
-  const deleteTeam = async (teamId, teamName) => {
-    if (!confirm(`確定要刪除「${teamName}」嗎？`)) return;
-    try {
-      await rtdbRemove(ref(rtdb, `race/${teamId}`));
-      showAdminMsg(`已刪除「${teamName}」`);
-    } catch (err) { showAdminMsg('刪除失敗：' + err.message); }
-  };
-
-  const resetRace = async () => {
-    if (!confirm('確定要重置所有隊伍的分數嗎？')) return;
-    try {
-      const updates = {};
-      Object.entries(raceData).forEach(([id, team]) => { updates[id] = { ...team, outboundScore: 0, inboundScore: 0, turnSuccess: false, lastRolls: '' }; });
-      await rtdbSet(ref(rtdb, 'race'), updates);
-      showAdminMsg('✅ 比賽已重置');
-    } catch (err) { showAdminMsg('重置失敗：' + err.message); }
-  };
-
-  // === 攤位操作 ===
-  const startEditBooth = (booth) => {
-    setEditBooth(booth ? { ...booth } : { id: '', side: 'top', name: '', owner: '', emoji: '🏮', description: '', plurkUrl: '', task: '', facadeImageUrl: '', stampImageUrl: '', order: boothsList.length + 1 });
-    setEditItems(booth?.items || []);
-  };
-
+  // ---------- 攤位 ----------
+  const blankBooth = () => ({ id: '', name: '', emoji: '🏮', side: 'top', description: '', plurkUrl: '', task: '', stampImageUrl: '', facadeImageUrl: '', stampHint: '', items: [] });
   const saveBooth = async () => {
-    if (!editBooth.name.trim()) return showAdminMsg('請輸入攤位名稱');
-    const boothId = editBooth.id || ('booth-' + Date.now());
+    if (!editing.name.trim()) return toast('攤位名稱必填', 'err');
+    setBusy(true);
     try {
-      const { items, id, ...boothData } = editBooth;
-      await setDoc(doc(db, 'booths', boothId), boothData);
-      // 儲存商品：先刪除舊的，再寫入新的
-      const existingItems = await getDocs(collection(db, 'booths', boothId, 'items'));
-      for (const d of existingItems.docs) { await deleteDoc(doc(db, 'booths', boothId, 'items', d.id)); }
-      for (const item of editItems) {
-        const itemId = item.id || ('item-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6));
-        await setDoc(doc(db, 'booths', boothId, 'items', itemId), { name: item.name || '', price: Number(item.price) || 0, description: item.description || '', imageUrl: item.imageUrl || '' });
+      const id = editing.id || ('booth-' + Date.now());
+      const { items, id: _omit, ...fields } = editing;
+      await setDoc(doc(db, 'booths', id), fields, { merge: true });
+      // 同步商品：先刪除已移除的，再寫入現有的
+      const existing = (await getDocs(collection(db, 'booths', id, 'items'))).docs.map(d => d.id);
+      const keepIds = items.filter(it => it.id).map(it => it.id);
+      for (const exId of existing) { if (!keepIds.includes(exId)) await deleteDoc(doc(db, 'booths', id, 'items', exId)); }
+      for (const it of items) {
+        const itemId = it.id || ('item-' + Date.now() + '-' + Math.floor(Math.random() * 999));
+        await setDoc(doc(db, 'booths', id, 'items', itemId), { name: it.name || '', price: Number(it.price) || 0, description: it.description || '', imageUrl: it.imageUrl || '' });
       }
-      setEditBooth(null);
-      setEditItems([]);
-      await loadAll();
-      showAdminMsg(`✅ 攤位「${boothData.name}」已儲存`);
-    } catch (err) { showAdminMsg('儲存失敗：' + err.message); }
+      toast('攤位已儲存');
+      setEditing(null);
+      loadAll();
+    } catch (e) { toast('儲存失敗：' + e.message, 'err'); }
+    finally { setBusy(false); }
   };
-
-  const deleteBooth = async (boothId, name) => {
-    if (!confirm(`確定要刪除「${name}」嗎？商品也會一起刪除。`)) return;
+  const deleteBooth = async (id) => {
+    if (!window.confirm('確定刪除這個攤位？（商品也會一併刪除）')) return;
+    setBusy(true);
     try {
-      const itemSnap = await getDocs(collection(db, 'booths', boothId, 'items'));
-      for (const d of itemSnap.docs) { await deleteDoc(doc(db, 'booths', boothId, 'items', d.id)); }
-      await deleteDoc(doc(db, 'booths', boothId));
-      await loadAll();
-      showAdminMsg(`已刪除「${name}」`);
-    } catch (err) { showAdminMsg('刪除失敗：' + err.message); }
+      const its = await getDocs(collection(db, 'booths', id, 'items'));
+      for (const d of its.docs) await deleteDoc(doc(db, 'booths', id, 'items', d.id));
+      await deleteDoc(doc(db, 'booths', id));
+      toast('攤位已刪除'); loadAll();
+    } catch (e) { toast('刪除失敗：' + e.message, 'err'); }
+    finally { setBusy(false); }
   };
 
-  // === 設定 ===
+  // ---------- 玩家 ----------
+  const [batchText, setBatchText] = useState('');
+  const batchCreate = async () => {
+    const lines = batchText.split('\n').map(s => s.trim()).filter(Boolean);
+    if (lines.length === 0) return toast('請每行輸入一位玩家：暱稱,密碼（密碼可省略，預設0000）', 'err');
+    setBusy(true);
+    let ok = 0, skip = 0;
+    try {
+      for (const line of lines) {
+        const [name, pin] = line.split(/[,，]/).map(s => (s || '').trim());
+        if (!name) continue;
+        const exist = await getDoc(doc(db, 'players', name));
+        if (exist.exists()) { skip++; continue; }
+        await setDoc(doc(db, 'players', name), { pin: pin || '0000', coins: 500, inventory: [], stamps: [], createdAt: Timestamp.now() });
+        ok++;
+      }
+      toast(`已建立 ${ok} 位玩家${skip ? `（略過重複 ${skip} 位）` : ''}`);
+      setBatchText(''); loadAll();
+    } catch (e) { toast('批次建立失敗：' + e.message, 'err'); }
+    finally { setBusy(false); }
+  };
+  const setPlayerCoins = async (username) => {
+    const val = parseInt(coinInput[username]);
+    if (isNaN(val)) return toast('請輸入數字', 'err');
+    try {
+      await updateDoc(doc(db, 'players', username), { coins: val });
+      toast(`${username} 的購物金已設為 ${val}`);
+      setCoinInput(p => ({ ...p, [username]: '' })); loadAll();
+    } catch (e) { toast('更新失敗：' + e.message, 'err'); }
+  };
+  const deletePlayer = async (username) => {
+    if (!window.confirm(`確定刪除玩家「${username}」？`)) return;
+    try { await deleteDoc(doc(db, 'players', username)); toast('已刪除'); loadAll(); }
+    catch (e) { toast('刪除失敗：' + e.message, 'err'); }
+  };
+
+  // ---------- 設定 ----------
   const saveSettings = async () => {
     try {
-      await setDoc(doc(db, 'settings', 'general'), settings);
-      showAdminMsg('✅ 設定已儲存');
-    } catch (err) { showAdminMsg('儲存失敗：' + err.message); }
+      await setDoc(doc(db, 'settings', 'general'), settings, { merge: true });
+      toast('設定已儲存');
+    } catch (e) { toast('儲存失敗：' + e.message, 'err'); }
   };
 
-  // === 玩家操作 ===
-  const updatePlayerCoins = async (username, newCoins) => {
-    try {
-      await updateDoc(doc(db, 'players', username), { coins: Number(newCoins) });
-      setPlayers(prev => prev.map(p => p.username === username ? { ...p, coins: Number(newCoins) } : p));
-      showAdminMsg(`已更新 ${username} 的金幣為 ${newCoins}`);
-    } catch (err) { showAdminMsg('更新失敗'); }
+  // ---------- 龍舟賽 ----------
+  const addTeam = async () => {
+    if (!newTeam.name.trim()) return toast('隊伍名稱必填', 'err');
+    const id = 'team-' + Date.now();
+    await rtdbSet(ref(rtdb, `race/${id}`), { ...newTeam, outboundScore: 0, inboundScore: 0, turnSuccess: false, cheers: 0, lastRolls: '', lastEvent: null });
+    setNewTeam({ name: '', color: '#0d9488', flagImageUrl: '' });
+    toast('隊伍已加入');
+  };
+  const updateTeamField = (id, field, value) => rtdbSet(ref(rtdb, `race/${id}/${field}`), value);
+  const deleteTeam = async (id) => {
+    if (!window.confirm('確定刪除這支隊伍？')) return;
+    await rtdbRemove(ref(rtdb, `race/${id}`));
+    toast('隊伍已刪除');
   };
 
-  const batchCreatePlayers = async () => {
-    const names = batchNames.split('\n').map(n => n.trim()).filter(n => n);
-    if (!names.length) return showAdminMsg('請輸入至少一個玩家名稱');
-    if (batchPin.length < 4) return showAdminMsg('密碼至少 4 位');
-    let created = 0, skipped = 0;
-    for (const name of names) {
-      const existing = await getDoc(doc(db, 'players', name));
-      if (existing.exists()) { skipped++; continue; }
-      await setDoc(doc(db, 'players', name), { pin: batchPin, coins: Number(batchCoins) || 500, inventory: [], stamps: [], createdAt: Timestamp.now() });
-      created++;
+  // 取得該隊本輪事件（預設 / 自訂）
+  const getEventForTeam = (teamId) => {
+    const sel = eventSel[teamId] || '';
+    if (!sel) return null;
+    if (sel === 'custom') {
+      const c = customEvent[teamId] || {};
+      const d = parseInt(c.delta);
+      if (!c.name || isNaN(d)) return null;
+      return { name: c.name.trim(), delta: d, icon: d >= 0 ? 'spark' : 'wave' };
     }
-    setBatchNames('');
-    await loadAll();
-    showAdminMsg(`✅ 建立 ${created} 個玩家` + (skipped > 0 ? `，${skipped} 個已存在跳過` : ''));
+    const p = RACE_EVENTS.find(e => e.id === sel);
+    return p ? { name: p.name, delta: p.delta, icon: p.icon } : null;
   };
 
-  const COLORS = ['#dc2626','#2563eb','#16a34a','#9333ea','#ea580c','#0891b2','#c026d3','#65a30d','#e11d48','#0d9488'];
-  const tabs = [
-    { id: 'dashboard', label: '📊 總覽' },
-    { id: 'booths', label: '🏪 攤位' },
-    { id: 'race', label: '🐉 龍舟' },
-    { id: 'settings', label: '🔒 設定' },
-    { id: 'players', label: '👥 玩家' },
-  ];
+  // ★ 結算本輪：擲骰總和 + 事件增減（下限0），寫入 lastEvent 與事件紀錄
+  const processTeamRolls = async (team) => {
+    const raw = (rollsInput[team.id] || '').trim();
+    const rolls = raw.split(/[,，\s]+/).map(n => parseInt(n)).filter(n => !isNaN(n));
+    if (rolls.length === 0) return toast('請先輸入本輪擲骰結果（逗號分隔）', 'err');
+    const rollSum = rolls.reduce((s, n) => s + n, 0);
+    const ev = getEventForTeam(team.id);
+    const move = Math.max(0, rollSum + (ev ? ev.delta : 0));   // 事件後不會倒退，最低 0
+
+    const updates = { lastRolls: rolls.join(','), lastEvent: ev ? { ...ev, t: Date.now() } : null };
+    if (team.outboundScore < 200) {
+      updates.outboundScore = Math.min(200, team.outboundScore + move);
+    } else if (team.turnSuccess) {
+      updates.inboundScore = Math.min(200, team.inboundScore + move);
+    } else {
+      return toast('該隊在折返點，請先切換「奪旗成功」再結算回程', 'err');
+    }
+    try {
+      for (const [k, v] of Object.entries(updates)) await rtdbSet(ref(rtdb, `race/${team.id}/${k}`), v);
+      if (ev) await rtdbSet(ref(rtdb, `raceEvents/${Date.now()}`), { team: team.name, name: ev.name, delta: ev.delta, icon: ev.icon });
+      setRollsInput(p => ({ ...p, [team.id]: '' }));
+      setEventSel(p => ({ ...p, [team.id]: '' }));
+      toast(`${team.name}：骰點 ${rollSum}${ev ? `，${ev.name} ${ev.delta >= 0 ? '+' : ''}${ev.delta}` : ''} → 前進 ${move}`);
+    } catch (e) { toast('結算失敗：' + e.message, 'err'); }
+  };
+
+  // ★ 重置比賽：分數/打氣/骰點/事件全清，含事件紀錄
+  const resetRace = async () => {
+    if (!window.confirm('確定重置整場比賽？所有分數、打氣數與事件紀錄都會歸零。')) return;
+    try {
+      for (const t of teams) {
+        await rtdbSet(ref(rtdb, `race/${t.id}/outboundScore`), 0);
+        await rtdbSet(ref(rtdb, `race/${t.id}/inboundScore`), 0);
+        await rtdbSet(ref(rtdb, `race/${t.id}/turnSuccess`), false);
+        await rtdbSet(ref(rtdb, `race/${t.id}/cheers`), 0);
+        await rtdbSet(ref(rtdb, `race/${t.id}/lastRolls`), '');
+        await rtdbRemove(ref(rtdb, `race/${t.id}/lastEvent`));
+      }
+      await rtdbRemove(ref(rtdb, 'raceEvents'));
+      toast('比賽已重置');
+    } catch (e) { toast('重置失敗：' + e.message, 'err'); }
+  };
+
+  // ---------- 樣式速記 ----------
+  const inp = { width: '100%', boxSizing: 'border-box', padding: '9px 12px', background: '#0f172a', border: '1px solid #334155', borderRadius: 8, color: '#e2e8f0', fontSize: 13, outline: 'none', fontFamily: 'inherit' };
+  const btn = (bg = '#2563eb') => ({ padding: '9px 18px', background: bg, color: '#fff', border: 'none', borderRadius: 8, fontSize: 12, fontWeight: 800, cursor: 'pointer' });
+  const card = { background: '#1e293b', borderRadius: 12, padding: 16, border: '1px solid #334155' };
+  const lbl = { fontSize: 10, fontWeight: 700, color: '#94a3b8', display: 'block', marginBottom: 4 };
 
   return (
-    <div style={{ minHeight: '100vh', background: '#111827', color: '#e2e8f0', fontFamily: '"Noto Sans TC",-apple-system,sans-serif' }}>
-      <header style={{ background: '#1f2937', padding: '12px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #374151' }}>
+    <div style={{ minHeight: '100vh', background: '#0f172a', color: '#e2e8f0', fontFamily: '"Noto Sans TC",-apple-system,sans-serif', paddingBottom: 60 }}>
+      {/* Header */}
+      <header style={{ position: 'sticky', top: 0, zIndex: 50, background: 'rgba(15,23,42,0.95)', backdropFilter: 'blur(12px)', borderBottom: '1px solid #334155', padding: '12px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <span style={{ fontSize: 20 }}>🔐</span>
+          <span style={{ fontSize: 20 }}>🛠️</span>
           <div>
-            <h1 style={{ fontSize: 16, fontWeight: 900 }}>端午慶典管理後台</h1>
-            <p style={{ fontSize: 10, color: '#6b7280' }}>{adminUser.email}</p>
+            <h1 style={{ fontSize: 15, fontWeight: 900 }}>慶典管理後台</h1>
+            <p style={{ fontSize: 9, color: '#64748b' }}>{adminUser.email}</p>
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
-          <button onClick={() => { onLogout('preview'); }} style={{ ...btnGhost, color: '#9ca3af' }}>👁 預覽玩家頁</button>
-          <button onClick={onLogout} style={{ ...btnGhost, color: '#ef4444' }}>登出</button>
+          <button onClick={() => onLogout('preview')} style={btn('#0d9488')}>👀 以玩家視角預覽</button>
+          <button onClick={() => onLogout('logout')} style={btn('#475569')}>登出</button>
         </div>
       </header>
 
-      <div style={{ display: 'flex', gap: 4, padding: '12px 20px', background: '#1f2937', borderBottom: '1px solid #374151', overflowX: 'auto' }}>
-        {tabs.map(t => (
-          <button key={t.id} onClick={() => setTab(t.id)} style={{ padding: '8px 16px', borderRadius: 8, border: 'none', fontSize: 12, fontWeight: 700, cursor: 'pointer', flexShrink: 0, background: tab === t.id ? '#3b82f6' : 'transparent', color: tab === t.id ? '#fff' : '#9ca3af' }}>{t.label}</button>
+      {msg && (
+        <div style={{ position: 'fixed', top: 70, left: '50%', transform: 'translateX(-50%)', zIndex: 200, background: msg.type === 'err' ? '#7f1d1d' : '#14532d', color: '#fff', padding: '10px 20px', borderRadius: 10, fontSize: 12, fontWeight: 700, maxWidth: '90vw' }}>{msg.text}</div>
+      )}
+
+      {/* Tabs */}
+      <div style={{ display: 'flex', gap: 6, padding: '14px 20px 0', overflowX: 'auto' }}>
+        {[
+          { id: 'dashboard', label: '📊 總覽' },
+          { id: 'booths', label: '🏮 攤位管理' },
+          { id: 'players', label: '👥 玩家管理' },
+          { id: 'race', label: '🚣 龍舟賽控制' },
+          { id: 'settings', label: '⚙️ 設定' },
+        ].map(t => (
+          <button key={t.id} onClick={() => { setTab(t.id); if (t.id !== 'booths') setEditing(null); }} style={{ flexShrink: 0, padding: '9px 16px', borderRadius: '10px 10px 0 0', border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 800, background: tab === t.id ? '#1e293b' : 'transparent', color: tab === t.id ? '#fff' : '#64748b' }}>{t.label}</button>
         ))}
       </div>
 
-      {msg && <div style={{ position: 'fixed', top: 16, right: 16, background: '#10b981', color: '#fff', padding: '10px 20px', borderRadius: 12, fontSize: 13, fontWeight: 700, zIndex: 100, boxShadow: '0 8px 24px rgba(0,0,0,0.3)' }}>{msg}</div>}
-
-      <div style={{ padding: 20, maxWidth: 900, margin: '0 auto' }}>
+      <main style={{ maxWidth: 860, margin: '0 auto', padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: 14 }}>
 
         {/* ===== 總覽 ===== */}
         {tab === 'dashboard' && (
-          <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-              <h2 style={{ fontSize: 20, fontWeight: 900 }}>📊 活動總覽</h2>
-              <button onClick={loadAll} style={btnGhost}>🔄 重新整理</button>
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
+          <>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10 }}>
               {[
-                { label: '攤位數', value: stats.booths, icon: '🏪', color: '#3b82f6' },
-                { label: '玩家數', value: stats.players, icon: '👥', color: '#10b981' },
-                { label: '總集章', value: stats.stamps, icon: '🏆', color: '#f59e0b' },
-                { label: '總銷售', value: `$${stats.sales}`, icon: '💰', color: '#ef4444' },
+                { label: '攤位數', val: boothList.length, icon: '🏮' },
+                { label: '玩家數', val: playerList.length, icon: '👥' },
+                { label: '總集章數', val: playerList.reduce((s, p) => s + (p.stamps || []).length, 0), icon: '📮' },
+                { label: '龍舟隊伍', val: teams.length, icon: '🚣' },
               ].map((s, i) => (
-                <div key={i} style={{ ...cardStyle, textAlign: 'center' }}>
-                  <div style={{ fontSize: 24, marginBottom: 4 }}>{s.icon}</div>
-                  <div style={{ fontSize: 28, fontWeight: 900, color: s.color, fontFamily: 'monospace' }}>{s.value}</div>
-                  <div style={{ fontSize: 10, color: '#6b7280', fontWeight: 700, marginTop: 4 }}>{s.label}</div>
+                <div key={i} style={{ ...card, textAlign: 'center' }}>
+                  <div style={{ fontSize: 22 }}>{s.icon}</div>
+                  <div style={{ fontSize: 26, fontWeight: 900, fontFamily: 'monospace', margin: '4px 0' }}>{s.val}</div>
+                  <div style={{ fontSize: 10, color: '#94a3b8', fontWeight: 700 }}>{s.label}</div>
                 </div>
               ))}
             </div>
-          </div>
+            <div style={card}>
+              <p style={{ fontSize: 12, fontWeight: 800, marginBottom: 10 }}>各攤位集章統計</p>
+              {boothList.map(b => {
+                const cnt = playerList.filter(p => (p.stamps || []).includes(b.id)).length;
+                return (
+                  <div key={b.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 0', borderBottom: '1px solid #283548' }}>
+                    <span style={{ fontSize: 15 }}>{b.emoji}</span>
+                    <span style={{ flex: 1, fontSize: 12, fontWeight: 700 }}>{b.name}</span>
+                    <span style={{ width: 120, height: 5, background: '#0f172a', borderRadius: 3, position: 'relative' }}>
+                      <span style={{ position: 'absolute', left: 0, top: 0, bottom: 0, borderRadius: 3, width: `${playerList.length ? (cnt / playerList.length) * 100 : 0}%`, background: '#0d9488' }} />
+                    </span>
+                    <span style={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 800, width: 30, textAlign: 'right' }}>{cnt}</span>
+                  </div>
+                );
+              })}
+              {boothList.length === 0 && <p style={{ fontSize: 11, color: '#64748b' }}>還沒有攤位資料</p>}
+            </div>
+          </>
         )}
 
         {/* ===== 攤位管理 ===== */}
-        {tab === 'booths' && !editBooth && (
-          <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-              <h2 style={{ fontSize: 20, fontWeight: 900 }}>🏪 攤位管理（{boothsList.length} 攤）</h2>
-              <button onClick={() => startEditBooth(null)} style={btnPrimary}>＋ 新增攤位</button>
-            </div>
-            {boothsList.map(b => (
-              <div key={b.id} style={{ ...cardStyle, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                  <span style={{ fontSize: 28 }}>{b.emoji}</span>
-                  <div>
-                    <p style={{ fontWeight: 800, fontSize: 14 }}>{b.name}</p>
-                    <p style={{ fontSize: 10, color: '#6b7280' }}>攤主：{b.owner} ・ {b.side === 'top' ? '上排' : '下排'} ・ {b.items?.length || 0} 件商品</p>
-                  </div>
+        {tab === 'booths' && !editing && (
+          <>
+            <button onClick={() => setEditing(blankBooth())} style={btn('#0d9488')}>＋ 新增攤位</button>
+            {boothList.map(b => (
+              <div key={b.id} style={{ ...card, display: 'flex', alignItems: 'center', gap: 12 }}>
+                <span style={{ fontSize: 24 }}>{b.emoji}</span>
+                <div style={{ flex: 1 }}>
+                  <p style={{ fontSize: 13, fontWeight: 800 }}>{b.name} <span style={{ fontSize: 9, color: '#64748b' }}>（{b.side === 'top' ? '上排' : '下排'}）</span></p>
+                  <p style={{ fontSize: 10, color: '#94a3b8' }}>{(b.items || []).length} 項商品・ID: {b.id}</p>
                 </div>
-                <div style={{ display: 'flex', gap: 6 }}>
-                  <button onClick={() => startEditBooth(b)} style={btnGhost}>✏️ 編輯</button>
-                  <button onClick={() => deleteBooth(b.id, b.name)} style={{ ...btnGhost, color: '#f87171' }}>🗑 刪除</button>
-                </div>
+                <button onClick={() => setEditing({ ...blankBooth(), ...b, items: [...(b.items || [])] })} style={btn('#2563eb')}>編輯</button>
+                <button onClick={() => deleteBooth(b.id)} style={btn('#7f1d1d')}>刪除</button>
               </div>
             ))}
-            {boothsList.length === 0 && <p style={{ textAlign: 'center', color: '#6b7280', padding: 40 }}>尚無攤位，點右上角「＋ 新增攤位」開始建立</p>}
-          </div>
+          </>
         )}
-
-        {/* 攤位編輯表單 */}
-        {tab === 'booths' && editBooth && (
-          <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-              <h2 style={{ fontSize: 20, fontWeight: 900 }}>{editBooth.id ? '✏️ 編輯攤位' : '＋ 新增攤位'}</h2>
-              <button onClick={() => { setEditBooth(null); setEditItems([]); }} style={btnGhost}>✕ 取消</button>
-            </div>
-            <div style={cardStyle}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                <div>
-                  <label style={labelStyle}>攤位名稱 *</label>
-                  <input value={editBooth.name} onChange={e => setEditBooth(prev => ({ ...prev, name: e.target.value }))} style={inputStyle} placeholder="例：五月花粽" />
-                </div>
-                <div>
-                  <label style={labelStyle}>攤主暱稱</label>
-                  <input value={editBooth.owner} onChange={e => setEditBooth(prev => ({ ...prev, owner: e.target.value }))} style={inputStyle} placeholder="擺攤的玩家名字" />
-                </div>
-                <div>
-                  <label style={labelStyle}>位置</label>
-                  <select value={editBooth.side} onChange={e => setEditBooth(prev => ({ ...prev, side: e.target.value }))} style={inputStyle}>
-                    <option value="top">上排（河道上方）</option>
-                    <option value="bottom">下排（河道下方）</option>
-                  </select>
-                </div>
-                <div>
-                  <label style={labelStyle}>Emoji 圖示（沒有縮圖時才會顯示）</label>
-                  <input value={editBooth.emoji} onChange={e => setEditBooth(prev => ({ ...prev, emoji: e.target.value }))} style={inputStyle} placeholder="🍱" />
-                </div>
-              </div>
-              <label style={labelStyle}>攤位介紹</label>
-              <textarea value={editBooth.description} onChange={e => setEditBooth(prev => ({ ...prev, description: e.target.value }))} style={{ ...inputStyle, minHeight: 60, resize: 'vertical' }} placeholder="攤位的故事、特色..." />
-              <label style={labelStyle}>噗浪攤位網址</label>
-              <input value={editBooth.plurkUrl} onChange={e => setEditBooth(prev => ({ ...prev, plurkUrl: e.target.value }))} style={inputStyle} placeholder="https://www.plurk.com/p/..." />
-              <label style={labelStyle}>集章任務說明</label>
-              <input value={editBooth.task} onChange={e => setEditBooth(prev => ({ ...prev, task: e.target.value }))} style={inputStyle} placeholder="例：在噗浪留言即可集章" />
-              <label style={labelStyle}>攤位縮圖／封面圖（噗浪圖床網址）</label>
-              <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
-                <input value={editBooth.facadeImageUrl} onChange={e => setEditBooth(prev => ({ ...prev, facadeImageUrl: e.target.value }))} style={{ ...inputStyle, flex: 1 }} placeholder="https://images.plurk.com/xxx.jpg" />
-                {/* 縮圖即時預覽 */}
-                <div style={{ width: 56, height: 56, borderRadius: 12, flexShrink: 0, overflow: 'hidden', border: '1px solid #4b5563', background: 'linear-gradient(135deg, #1e3a34, #134e3a)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24 }}>
-                  {editBooth.facadeImageUrl ? (
-                    <img src={editBooth.facadeImageUrl} alt="預覽" style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                      onError={e => { e.target.style.display = 'none'; e.target.parentElement.textContent = editBooth.emoji || '🏮'; }} />
-                  ) : (editBooth.emoji || '🏮')}
-                </div>
-              </div>
-              <p style={{ fontSize: 10, color: '#6b7280', marginTop: 4 }}>填了縮圖網址後，玩家會看到這張圖；留空則顯示上面的 Emoji。右邊小框是即時預覽。</p>
-              <label style={labelStyle}>印章圖（噗浪圖床網址，留空用 emoji）</label>
-              <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
-                <input value={editBooth.stampImageUrl} onChange={e => setEditBooth(prev => ({ ...prev, stampImageUrl: e.target.value }))} style={{ ...inputStyle, flex: 1 }} placeholder="https://images.plurk.com/stamp.png" />
-                {/* 印章即時預覽（圓形） */}
-                <div style={{ width: 56, height: 56, borderRadius: '50%', flexShrink: 0, overflow: 'hidden', border: '2px solid rgba(13,148,136,0.4)', background: 'linear-gradient(135deg, #1e3a34, #134e3a)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24 }}>
-                  {editBooth.stampImageUrl ? (
-                    <img src={editBooth.stampImageUrl} alt="印章預覽" style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                      onError={e => { e.target.style.display = 'none'; e.target.parentElement.textContent = editBooth.emoji || '🏮'; }} />
-                  ) : (editBooth.emoji || '🏮')}
-                </div>
-              </div>
-
-              {/* 商品管理 */}
-              <div style={{ marginTop: 20, borderTop: '1px solid #374151', paddingTop: 16 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                  <p style={{ fontWeight: 800, fontSize: 14 }}>🛒 商品列表</p>
-                  <button onClick={() => setEditItems(prev => [...prev, { id: '', name: '', price: 0, description: '', imageUrl: '' }])} style={btnGhost}>＋ 新增商品</button>
-                </div>
-                {editItems.map((item, idx) => (
-                  <div key={idx} style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'center' }}>
-                    <input value={item.name} onChange={e => { const arr = [...editItems]; arr[idx] = { ...arr[idx], name: e.target.value }; setEditItems(arr); }} style={{ ...inputStyle, flex: 2 }} placeholder="商品名稱" />
-                    <input type="number" value={item.price} onChange={e => { const arr = [...editItems]; arr[idx] = { ...arr[idx], price: e.target.value }; setEditItems(arr); }} style={{ ...inputStyle, width: 80, flex: 0 }} placeholder="價格" />
-                    <input value={item.description} onChange={e => { const arr = [...editItems]; arr[idx] = { ...arr[idx], description: e.target.value }; setEditItems(arr); }} style={{ ...inputStyle, flex: 2 }} placeholder="說明" />
-                    <input value={item.imageUrl || ''} onChange={e => { const arr = [...editItems]; arr[idx] = { ...arr[idx], imageUrl: e.target.value }; setEditItems(arr); }} style={{ ...inputStyle, flex: 2 }} placeholder="圖片網址" />
-                    <button onClick={() => setEditItems(prev => prev.filter((_, i) => i !== idx))} style={{ ...btnGhost, color: '#f87171', flexShrink: 0 }}>✕</button>
-                  </div>
-                ))}
-                {editItems.length === 0 && <p style={{ fontSize: 11, color: '#6b7280' }}>尚無商品。點「＋ 新增商品」加入。</p>}
-              </div>
-
-              <button onClick={saveBooth} style={{ ...btnPrimary, width: '100%', marginTop: 20, padding: '14px 0', fontSize: 14 }}>💾 儲存攤位</button>
-            </div>
-          </div>
-        )}
-
-        {/* ===== 龍舟控制台 ===== */}
-        {tab === 'race' && (
-          <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-              <h2 style={{ fontSize: 20, fontWeight: 900 }}>🐉 龍舟控制台</h2>
-              <button onClick={resetRace} style={btnDanger}>🔄 全部重置</button>
-            </div>
-
-            {/* 新增隊伍 */}
-            <div style={{ ...cardStyle, marginBottom: 16 }}>
-              <p style={{ fontWeight: 800, fontSize: 13, marginBottom: 8 }}>＋ 新增隊伍</p>
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                <input value={newTeam.name} onChange={e => setNewTeam(prev => ({ ...prev, name: e.target.value }))} style={{ ...inputStyle, flex: 2, minWidth: 120 }} placeholder="隊伍名稱" />
-                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                  <span style={{ fontSize: 10, color: '#9ca3af' }}>顏色</span>
-                  <input type="color" value={newTeam.color} onChange={e => setNewTeam(prev => ({ ...prev, color: e.target.value }))} style={{ width: 36, height: 36, border: 'none', borderRadius: 8, cursor: 'pointer', background: 'transparent' }} />
-                </div>
-                <input value={newTeam.flagImageUrl} onChange={e => setNewTeam(prev => ({ ...prev, flagImageUrl: e.target.value }))} style={{ ...inputStyle, flex: 2, minWidth: 120 }} placeholder="旗幟圖片網址（選填）" />
-                <button onClick={addTeam} style={{ ...btnPrimary, flexShrink: 0 }}>新增</button>
+        {tab === 'booths' && editing && (
+          <div style={card}>
+            <p style={{ fontSize: 14, fontWeight: 900, marginBottom: 14 }}>{editing.id ? '編輯攤位' : '新增攤位'}</p>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 90px 90px', gap: 10, marginBottom: 10 }}>
+              <div><label style={lbl}>攤位名稱 *</label><input style={inp} value={editing.name} onChange={e => setEditing({ ...editing, name: e.target.value })} /></div>
+              <div><label style={lbl}>Emoji</label><input style={inp} value={editing.emoji} onChange={e => setEditing({ ...editing, emoji: e.target.value })} /></div>
+              <div><label style={lbl}>位置</label>
+                <select style={inp} value={editing.side} onChange={e => setEditing({ ...editing, side: e.target.value })}>
+                  <option value="top">上排</option><option value="bottom">下排</option>
+                </select>
               </div>
             </div>
-
-            {/* 隊伍列表 */}
-            {Object.entries(raceData).map(([teamId, team]) => {
-              const total = (Number(team.outboundScore) || 0) + (team.turnSuccess ? (Number(team.inboundScore) || 0) : 0);
-              return (
-                <div key={teamId} style={cardStyle}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <div style={{ width: 14, height: 14, borderRadius: '50%', background: team.color || '#666' }} />
-                      <span style={{ fontWeight: 800, fontSize: 14 }}>{team.name}</span>
-                      <span style={{ fontSize: 11, fontFamily: 'monospace', color: '#6b7280' }}>({total}/400)</span>
-                    </div>
-                    <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                      <span style={{ fontSize: 10, color: '#6b7280' }}>💖{team.cheers || 0}</span>
-                      <button onClick={() => deleteTeam(teamId, team.name)} style={{ ...btnGhost, color: '#f87171' }}>🗑</button>
-                    </div>
-                  </div>
-                  <div style={{ height: 8, background: '#374151', borderRadius: 4, marginBottom: 8, overflow: 'hidden' }}>
-                    <div style={{ height: '100%', width: `${Math.min(100, (total / 400) * 100)}%`, background: `linear-gradient(90deg, ${team.color || '#3b82f6'}, ${team.color || '#3b82f6'}88)`, borderRadius: 4, transition: 'width 0.5s' }} />
-                  </div>
-                  <div style={{ display: 'flex', gap: 8 }}>
-                    <input value={rollsInput[teamId] || ''} onChange={e => setRollsInput(prev => ({ ...prev, [teamId]: e.target.value }))} placeholder="輸入骰數，如 12,18,3,15,7" style={{ ...inputStyle, flex: 1, fontFamily: 'monospace' }} />
-                    <button onClick={() => processTeamRolls(teamId)} style={btnPrimary}>結算</button>
-                  </div>
-                </div>
-              );
-            })}
-            {Object.keys(raceData).length === 0 && <p style={{ textAlign: 'center', color: '#6b7280', padding: 40 }}>尚無隊伍，用上方表單新增第一支隊伍吧！</p>}
-          </div>
-        )}
-
-        {/* ===== 設定 ===== */}
-        {tab === 'settings' && (
-          <div>
-            <h2 style={{ fontSize: 20, fontWeight: 900, marginBottom: 16 }}>🔒 系統設定</h2>
-            <div style={cardStyle}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-                <div>
-                  <p style={{ fontWeight: 800, fontSize: 14 }}>開放玩家註冊</p>
-                  <p style={{ fontSize: 11, color: '#6b7280' }}>關閉後新玩家無法建立帳號</p>
-                </div>
-                <button onClick={() => setSettings(prev => ({ ...prev, registrationOpen: !prev.registrationOpen }))} style={{ width: 52, height: 28, borderRadius: 14, border: 'none', cursor: 'pointer', position: 'relative', background: settings.registrationOpen ? '#10b981' : '#374151', transition: 'background 0.3s' }}>
-                  <div style={{ width: 22, height: 22, borderRadius: '50%', background: '#fff', position: 'absolute', top: 3, left: settings.registrationOpen ? 27 : 3, transition: 'left 0.3s' }} />
-                </button>
+            {[
+              ['description', '攤位介紹'], ['plurkUrl', '噗浪連結'], ['task', '集章任務說明'],
+              ['stampImageUrl', '印章圖網址（噗浪圖床）'], ['facadeImageUrl', '封面圖網址'], ['stampHint', '印章備註（選填）'],
+            ].map(([key, label]) => (
+              <div key={key} style={{ marginBottom: 10 }}>
+                <label style={lbl}>{label}</label>
+                {key === 'description' || key === 'task'
+                  ? <textarea style={{ ...inp, minHeight: 60, resize: 'vertical' }} value={editing[key]} onChange={e => setEditing({ ...editing, [key]: e.target.value })} />
+                  : <input style={inp} value={editing[key]} onChange={e => setEditing({ ...editing, [key]: e.target.value })} />}
               </div>
-              <label style={labelStyle}>關閉時顯示的訊息</label>
-              <input value={settings.registrationClosedMsg || ''} onChange={e => setSettings(prev => ({ ...prev, registrationClosedMsg: e.target.value }))} style={inputStyle} />
-              <button onClick={saveSettings} style={{ ...btnPrimary, marginTop: 16 }}>💾 儲存設定</button>
+            ))}
+            <p style={{ fontSize: 11, fontWeight: 800, color: '#94a3b8', margin: '14px 0 8px' }}>商品（{editing.items.length}）</p>
+            {editing.items.map((it, i) => (
+              <div key={i} style={{ display: 'grid', gridTemplateColumns: '1fr 70px 1.4fr 1fr 50px', gap: 6, marginBottom: 6, alignItems: 'center' }}>
+                <input style={inp} placeholder="商品名" value={it.name || ''} onChange={e => { const arr = [...editing.items]; arr[i] = { ...it, name: e.target.value }; setEditing({ ...editing, items: arr }); }} />
+                <input style={inp} placeholder="價格" type="number" value={it.price ?? ''} onChange={e => { const arr = [...editing.items]; arr[i] = { ...it, price: e.target.value }; setEditing({ ...editing, items: arr }); }} />
+                <input style={inp} placeholder="說明" value={it.description || ''} onChange={e => { const arr = [...editing.items]; arr[i] = { ...it, description: e.target.value }; setEditing({ ...editing, items: arr }); }} />
+                <input style={inp} placeholder="圖片網址（建議去背PNG）" value={it.imageUrl || ''} onChange={e => { const arr = [...editing.items]; arr[i] = { ...it, imageUrl: e.target.value }; setEditing({ ...editing, items: arr }); }} />
+                <button onClick={() => setEditing({ ...editing, items: editing.items.filter((_, j) => j !== i) })} style={{ ...btn('#7f1d1d'), padding: '9px 0' }}>✕</button>
+              </div>
+            ))}
+            <button onClick={() => setEditing({ ...editing, items: [...editing.items, { name: '', price: 0, description: '', imageUrl: '' }] })} style={{ ...btn('#334155'), marginBottom: 14 }}>＋ 加一項商品</button>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button onClick={saveBooth} disabled={busy} style={btn('#0d9488')}>{busy ? '儲存中...' : '💾 儲存攤位'}</button>
+              <button onClick={() => setEditing(null)} style={btn('#475569')}>取消</button>
             </div>
           </div>
         )}
 
         {/* ===== 玩家管理 ===== */}
         {tab === 'players' && (
-          <div>
-            <h2 style={{ fontSize: 20, fontWeight: 900, marginBottom: 16 }}>👥 玩家管理（共 {players.length} 人）</h2>
+          <>
+            <div style={card}>
+              <p style={{ fontSize: 12, fontWeight: 800, marginBottom: 8 }}>批次建立玩家</p>
+              <p style={{ fontSize: 10, color: '#94a3b8', marginBottom: 8 }}>每行一位：「暱稱,密碼」，密碼省略時預設 0000</p>
+              <textarea style={{ ...inp, minHeight: 80, resize: 'vertical' }} placeholder={'小明,1234\n小華'} value={batchText} onChange={e => setBatchText(e.target.value)} />
+              <button onClick={batchCreate} disabled={busy} style={{ ...btn('#0d9488'), marginTop: 8 }}>{busy ? '建立中...' : '＋ 批次建立'}</button>
+            </div>
+            <div style={card}>
+              <p style={{ fontSize: 12, fontWeight: 800, marginBottom: 10 }}>玩家名單（{playerList.length}）</p>
+              {playerList.map(p => (
+                <div key={p.username} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 0', borderBottom: '1px solid #283548', flexWrap: 'wrap' }}>
+                  <span style={{ flex: 1, fontSize: 12, fontWeight: 800, minWidth: 90 }}>{p.username}</span>
+                  <span style={{ fontSize: 10, color: '#94a3b8', fontFamily: 'monospace' }}>🪙{p.coins ?? 0}・📮{(p.stamps || []).length}章・🛍️{(p.inventory || []).length}件</span>
+                  <input style={{ ...inp, width: 84, padding: '6px 8px' }} placeholder="設金額" value={coinInput[p.username] || ''} onChange={e => setCoinInput(prev => ({ ...prev, [p.username]: e.target.value }))} />
+                  <button onClick={() => setPlayerCoins(p.username)} style={{ ...btn('#2563eb'), padding: '7px 12px' }}>設定</button>
+                  <button onClick={() => deletePlayer(p.username)} style={{ ...btn('#7f1d1d'), padding: '7px 12px' }}>刪除</button>
+                </div>
+              ))}
+              {playerList.length === 0 && <p style={{ fontSize: 11, color: '#64748b' }}>還沒有玩家</p>}
+            </div>
+          </>
+        )}
 
-            {/* 新增單一玩家 */}
-            <div style={{ ...cardStyle, marginBottom: 16 }}>
-              <p style={{ fontWeight: 800, fontSize: 13, marginBottom: 8 }}>＋ 新增玩家</p>
-              <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap' }}>
-                <div>
-                  <label style={{ fontSize: 10, color: '#9ca3af', display: 'block', marginBottom: 4 }}>暱稱</label>
-                  <input value={batchNames} onChange={e => setBatchNames(e.target.value)} style={{ ...inputStyle, width: 160 }} placeholder="玩家暱稱" />
-                </div>
-                <div>
-                  <label style={{ fontSize: 10, color: '#9ca3af', display: 'block', marginBottom: 4 }}>密碼</label>
-                  <input value={batchPin} onChange={e => setBatchPin(e.target.value)} style={{ ...inputStyle, width: 120 }} placeholder="4位以上" />
-                </div>
-                <div>
-                  <label style={{ fontSize: 10, color: '#9ca3af', display: 'block', marginBottom: 4 }}>初始金幣</label>
-                  <input type="number" value={batchCoins} onChange={e => setBatchCoins(e.target.value)} style={{ ...inputStyle, width: 100 }} />
-                </div>
-                <button onClick={async () => {
-                  const name = batchNames.trim();
-                  if (!name) return showAdminMsg('請輸入玩家暱稱');
-                  if (batchPin.length < 4) return showAdminMsg('密碼至少 4 位');
-                  const existing = await getDoc(doc(db, 'players', name));
-                  if (existing.exists()) return showAdminMsg(`「${name}」已存在`);
-                  await setDoc(doc(db, 'players', name), { pin: batchPin, coins: Number(batchCoins) || 500, inventory: [], stamps: [], createdAt: Timestamp.now() });
-                  setBatchNames('');
-                  await loadAll();
-                  showAdminMsg(`✅ 已建立玩家「${name}」`);
-                }} style={btnPrimary}>建立</button>
-              </div>
+        {/* ===== 龍舟賽控制 ===== */}
+        {tab === 'race' && (
+          <>
+            <div style={{ ...card, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+              <div style={{ flex: 2, minWidth: 140 }}><label style={lbl}>隊伍名稱</label><input style={inp} value={newTeam.name} onChange={e => setNewTeam({ ...newTeam, name: e.target.value })} /></div>
+              <div><label style={lbl}>顏色</label><input type="color" style={{ ...inp, width: 60, padding: 4, height: 38 }} value={newTeam.color} onChange={e => setNewTeam({ ...newTeam, color: e.target.value })} /></div>
+              <div style={{ flex: 2, minWidth: 140 }}><label style={lbl}>隊旗圖網址（選填）</label><input style={inp} value={newTeam.flagImageUrl} onChange={e => setNewTeam({ ...newTeam, flagImageUrl: e.target.value })} /></div>
+              <button onClick={addTeam} style={btn('#0d9488')}>＋ 加入隊伍</button>
+              <button onClick={resetRace} style={btn('#7f1d1d')}>🔄 重置整場比賽</button>
             </div>
 
-            {/* 玩家列表 */}
-            <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-                <thead>
-                  <tr style={{ borderBottom: '1px solid #374151' }}>
-                    {['暱稱', '密碼', '金幣', '集章數', '商品數', '操作'].map(h => (<th key={h} style={{ textAlign: 'left', padding: '8px 12px', fontWeight: 800, color: '#9ca3af', fontSize: 10 }}>{h}</th>))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {players.sort((a, b) => (b.stamps?.length || 0) - (a.stamps?.length || 0)).map(p => (
-                    <tr key={p.username} style={{ borderBottom: '1px solid #1f2937' }}>
-                      <td style={{ padding: '8px 12px', fontWeight: 700 }}>{p.username}</td>
-                      <td style={{ padding: '8px 12px', fontFamily: 'monospace', color: '#94a3b8', letterSpacing: 2 }}>{p.pin}</td>
-                      <td style={{ padding: '8px 12px', fontFamily: 'monospace', color: '#fbbf24' }}>{p.coins}</td>
-                      <td style={{ padding: '8px 12px' }}>{p.stamps?.length || 0}</td>
-                      <td style={{ padding: '8px 12px' }}>{p.inventory?.length || 0}</td>
-                      <td style={{ padding: '8px 12px', display: 'flex', gap: 4 }}>
-                        <button onClick={() => { const v = prompt(`修改 ${p.username} 的金幣（目前 ${p.coins}）：`, p.coins); if (v !== null && !isNaN(v)) updatePlayerCoins(p.username, v); }} style={btnGhost}>改金幣</button>
-                        <button onClick={async () => { const v = prompt(`修改 ${p.username} 的密碼（目前 ${p.pin}）：`, p.pin); if (v && v.length >= 4) { await updateDoc(doc(db, 'players', p.username), { pin: v }); await loadAll(); showAdminMsg(`已更新 ${p.username} 的密碼`); } else if (v) { showAdminMsg('密碼至少 4 位'); } }} style={btnGhost}>改密碼</button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            {teams.map(team => {
+              const sel = eventSel[team.id] || '';
+              const atTurn = team.outboundScore >= 200 && !team.turnSuccess;
+              return (
+                <div key={team.id} style={card}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10, flexWrap: 'wrap' }}>
+                    <span style={{ width: 14, height: 14, borderRadius: 3, background: team.color }} />
+                    <span style={{ fontSize: 14, fontWeight: 900, flex: 1 }}>{team.name}</span>
+                    <span style={{ fontSize: 10, color: '#94a3b8', fontFamily: 'monospace' }}>去程 {team.outboundScore}/200・回程 {team.inboundScore}/200・💖{team.cheers}</span>
+                    <button onClick={() => deleteTeam(team.id)} style={{ ...btn('#7f1d1d'), padding: '6px 10px' }}>刪除</button>
+                  </div>
+
+                  {/* 折返控制 */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: 10, fontWeight: 800, color: atTurn ? '#f59e0b' : '#64748b' }}>{atTurn ? '⚑ 到達折返點！' : team.turnSuccess ? '✓ 已奪旗，回程中' : '去程划行中'}</span>
+                    <button onClick={() => updateTeamField(team.id, 'turnSuccess', !team.turnSuccess)} style={{ ...btn(team.turnSuccess ? '#475569' : '#b45309'), padding: '6px 12px' }}>
+                      {team.turnSuccess ? '取消奪旗狀態' : '標記奪旗成功'}
+                    </button>
+                  </div>
+
+                  {/* 擲骰 + 事件（第5點需求） */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1.3fr 1.3fr auto auto', gap: 8, alignItems: 'end' }}>
+                    <div>
+                      <label style={lbl}>本輪擲骰（逗號分隔）</label>
+                      <input style={inp} placeholder="例：15,20,3,8" value={rollsInput[team.id] || ''} onChange={e => setRollsInput(p => ({ ...p, [team.id]: e.target.value }))} />
+                    </div>
+                    <div>
+                      <label style={lbl}>本輪事件</label>
+                      <select style={inp} value={sel} onChange={e => setEventSel(p => ({ ...p, [team.id]: e.target.value }))}>
+                        <option value="">— 本輪無事件 —</option>
+                        {RACE_EVENTS.map(ev => <option key={ev.id} value={ev.id}>{ev.name}（{ev.delta >= 0 ? '+' : ''}{ev.delta}）</option>)}
+                        <option value="custom">✏️ 自訂事件…</option>
+                      </select>
+                    </div>
+                    <button onClick={() => { const p = RACE_EVENTS[Math.floor(Math.random() * RACE_EVENTS.length)]; setEventSel(prev => ({ ...prev, [team.id]: p.id })); }} style={{ ...btn('#334155'), padding: '9px 12px' }} title="隨機抽一個預設事件">🎲 隨機</button>
+                    <button onClick={() => processTeamRolls(team)} style={btn('#0d9488')}>結算本輪</button>
+                  </div>
+                  {sel === 'custom' && (
+                    <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 8, marginTop: 8 }}>
+                      <input style={inp} placeholder="事件名稱（例：災厄鮭襲擊）" value={(customEvent[team.id] || {}).name || ''} onChange={e => setCustomEvent(p => ({ ...p, [team.id]: { ...(p[team.id] || {}), name: e.target.value } }))} />
+                      <input style={inp} type="number" placeholder="增減點數（例：-5）" value={(customEvent[team.id] || {}).delta ?? ''} onChange={e => setCustomEvent(p => ({ ...p, [team.id]: { ...(p[team.id] || {}), delta: e.target.value } }))} />
+                    </div>
+                  )}
+                  {team.lastEvent && <p style={{ fontSize: 10, color: '#94a3b8', marginTop: 8 }}>上輪事件：{team.lastEvent.name}（{team.lastEvent.delta >= 0 ? '+' : ''}{team.lastEvent.delta}）</p>}
+                </div>
+              );
+            })}
+            {teams.length === 0 && <div style={{ ...card, textAlign: 'center', color: '#64748b', fontSize: 12 }}>還沒有隊伍，先在上面加入吧</div>}
+          </>
+        )}
+
+        {/* ===== 設定 ===== */}
+        {tab === 'settings' && (
+          <div style={card}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', marginBottom: 14 }}>
+              <input type="checkbox" checked={settings.registrationOpen} onChange={e => setSettings({ ...settings, registrationOpen: e.target.checked })} style={{ width: 18, height: 18 }} />
+              <span style={{ fontSize: 13, fontWeight: 800 }}>開放新玩家登記</span>
+            </label>
+            <label style={lbl}>關閉登記時顯示的訊息</label>
+            <input style={inp} value={settings.registrationClosedMsg} onChange={e => setSettings({ ...settings, registrationClosedMsg: e.target.value })} placeholder="目前尚未開放新玩家登記" />
+            <button onClick={saveSettings} style={{ ...btn('#0d9488'), marginTop: 12 }}>💾 儲存設定</button>
           </div>
         )}
-      </div>
-
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;700;900&display=swap');
-        * { margin:0; padding:0; box-sizing:border-box; }
-      `}</style>
+      </main>
     </div>
   );
 }
