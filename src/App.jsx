@@ -173,6 +173,7 @@ function AppInner() {
   const [collectors, setCollectors] = useState([]);
   const [raceTeams, setRaceTeams] = useState([]);
   const [zoomFlagUrl, setZoomFlagUrl] = useState(null);
+  const [stampReveal, setStampReveal] = useState(null);
   const [adminUser, setAdminUser] = useState(null);
   const [boothsLoading, setBoothsLoading] = useState(true);
   const [raceLoading, setRaceLoading] = useState(true);
@@ -487,7 +488,16 @@ function AppInner() {
 
     const optimistic = { ...userData, coins: userData.coins + 50, stamps: [...userData.stamps, boothId] };
     setUserData(optimistic);
-    showMsg('成功集章！獲得 50 元購物金！', 'success');
+    // 顯示集章確認卡（放大可愛的印章圖）
+    const booth = booths.find(b => b.id === boothId) || selectedBooth;
+    if (booth) {
+      setStampReveal({
+        boothName: booth.name,
+        boothEmoji: booth.emoji,
+        stamp: booth.stamp || { imageUrl: booth.stampImageUrl || '' },
+        reward: 50,
+      });
+    }
 
     if (!userData.isDemo) {
       try {
@@ -636,6 +646,62 @@ function AppInner() {
       {message && (
         <div style={{ position: 'fixed', top: 80, left: '50%', transform: 'translateX(-50%)', zIndex: 100, background: message.type === 'success' ? '#065f46' : message.type === 'warn' ? '#92400e' : '#1e293b', color: '#fff', padding: '12px 24px', borderRadius: 16, fontSize: 12, fontWeight: 700, boxShadow: '0 8px 32px rgba(0,0,0,0.2)', animation: 'fadeSlideDown 0.3s ease-out', display: 'flex', alignItems: 'center', gap: 8, maxWidth: '90vw' }}>
           <span>{message.type === 'success' ? '✓' : message.type === 'warn' ? '⚠' : 'ℹ'}</span> {message.text}
+        </div>
+      )}
+
+      {/* 集章成功確認卡 */}
+      {stampReveal && (
+        <div onClick={() => setStampReveal(null)} style={{
+          position: 'fixed', inset: 0, zIndex: 250,
+          background: 'rgba(15,41,34,0.75)', backdropFilter: 'blur(10px)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          cursor: 'pointer', animation: 'fadeIn 0.25s ease-out', padding: 24
+        }}>
+          <div onClick={e => e.stopPropagation()} style={{
+            position: 'relative', width: '100%', maxWidth: 320,
+            background: 'linear-gradient(160deg, #ffffff, #fffbeb)',
+            borderRadius: 28, padding: '36px 28px 28px',
+            boxShadow: '0 24px 80px rgba(0,0,0,0.35)',
+            textAlign: 'center', cursor: 'default',
+            animation: 'stampCardIn 0.5s cubic-bezier(0.16,1,0.3,1)', overflow: 'hidden'
+          }}>
+            {/* 頂部緞帶 */}
+            <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 6, background: 'linear-gradient(90deg, #fbbf24, #f59e0b, #fbbf24)' }} />
+            {/* 漂浮慶祝粒子 */}
+            {['✨', '🎉', '⭐', '🎊'].map((icon, i) => (
+              <span key={i} style={{ position: 'absolute', fontSize: 16, top: `${15 + (i % 2) * 8}%`, left: `${12 + i * 24}%`, animation: `stampCelebrate 2s ease-in-out ${i * 0.25}s infinite`, opacity: 0.6, pointerEvents: 'none' }}>{icon}</span>
+            ))}
+
+            <p style={{ fontSize: 11, fontWeight: 800, color: '#f59e0b', letterSpacing: 3, textTransform: 'uppercase', marginBottom: 4, position: 'relative', zIndex: 2 }}>集章成功</p>
+            <p style={{ fontSize: 13, fontWeight: 700, color: '#92400e', marginBottom: 20, position: 'relative', zIndex: 2 }}>獲得新印章！</p>
+
+            {/* 印章圖放大 - 蓋章動畫 */}
+            <div style={{ display: 'inline-block', marginBottom: 18, animation: 'stampPress 0.6s cubic-bezier(0.34,1.56,0.64,1) 0.2s both', position: 'relative', zIndex: 2 }}>
+              <StampDesign stamp={stampReveal.stamp} size={140} stamped={true} boothEmoji={stampReveal.boothEmoji} />
+            </div>
+
+            {/* 攤位名稱 */}
+            <div style={{ background: 'rgba(13,148,136,0.08)', borderRadius: 14, padding: '10px 16px', marginBottom: 12, position: 'relative', zIndex: 2 }}>
+              <p style={{ fontSize: 9, fontWeight: 700, color: '#0d9488', letterSpacing: 1, marginBottom: 2 }}>來自攤位</p>
+              <p style={{ fontSize: 16, fontWeight: 900, color: '#134e3a', fontFamily: '"Noto Serif TC", serif' }}>{stampReveal.boothEmoji} {stampReveal.boothName}</p>
+            </div>
+
+            {/* 獎勵 */}
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'linear-gradient(135deg, #fef3c7, #fde68a)', padding: '8px 18px', borderRadius: 20, marginBottom: 20, border: '1px solid rgba(245,158,11,0.25)', position: 'relative', zIndex: 2 }}>
+              <span style={{ fontSize: 16 }}>🪙</span>
+              <span style={{ fontSize: 15, fontWeight: 900, color: '#92400e', fontFamily: 'monospace' }}>+{stampReveal.reward}</span>
+              <span style={{ fontSize: 11, fontWeight: 700, color: '#a16207' }}>購物金</span>
+            </div>
+
+            <button onClick={() => setStampReveal(null)} style={{ width: '100%', padding: '14px 0', background: 'linear-gradient(135deg, #0d9488, #065f46)', color: '#fff', fontSize: 14, fontWeight: 900, border: 'none', borderRadius: 16, cursor: 'pointer', letterSpacing: 1, position: 'relative', zIndex: 2 }}>
+              收下印章 ✓
+            </button>
+          </div>
+          <style>{`
+            @keyframes stampCardIn { 0%{opacity:0;transform:translateY(30px) scale(0.9)} 100%{opacity:1;transform:translateY(0) scale(1)} }
+            @keyframes stampPress { 0%{transform:scale(2.2) rotate(-12deg);opacity:0} 60%{transform:scale(0.92) rotate(4deg);opacity:1} 100%{transform:scale(1) rotate(0deg)} }
+            @keyframes stampCelebrate { 0%,100%{transform:translateY(0) rotate(0deg)} 50%{transform:translateY(-12px) rotate(12deg)} }
+          `}</style>
         </div>
       )}
 
@@ -1873,7 +1939,7 @@ function AdminPanel({ adminUser, onLogout, db, rtdb }) {
                   </select>
                 </div>
                 <div>
-                  <label style={labelStyle}>Emoji 圖示</label>
+                  <label style={labelStyle}>Emoji 圖示（沒有縮圖時才會顯示）</label>
                   <input value={editBooth.emoji} onChange={e => setEditBooth(prev => ({ ...prev, emoji: e.target.value }))} style={inputStyle} placeholder="🍱" />
                 </div>
               </div>
@@ -1883,10 +1949,29 @@ function AdminPanel({ adminUser, onLogout, db, rtdb }) {
               <input value={editBooth.plurkUrl} onChange={e => setEditBooth(prev => ({ ...prev, plurkUrl: e.target.value }))} style={inputStyle} placeholder="https://www.plurk.com/p/..." />
               <label style={labelStyle}>集章任務說明</label>
               <input value={editBooth.task} onChange={e => setEditBooth(prev => ({ ...prev, task: e.target.value }))} style={inputStyle} placeholder="例：在噗浪留言即可集章" />
-              <label style={labelStyle}>封面圖（噗浪圖床網址）</label>
-              <input value={editBooth.facadeImageUrl} onChange={e => setEditBooth(prev => ({ ...prev, facadeImageUrl: e.target.value }))} style={inputStyle} placeholder="https://images.plurk.com/xxx.jpg" />
+              <label style={labelStyle}>攤位縮圖／封面圖（噗浪圖床網址）</label>
+              <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+                <input value={editBooth.facadeImageUrl} onChange={e => setEditBooth(prev => ({ ...prev, facadeImageUrl: e.target.value }))} style={{ ...inputStyle, flex: 1 }} placeholder="https://images.plurk.com/xxx.jpg" />
+                {/* 縮圖即時預覽 */}
+                <div style={{ width: 56, height: 56, borderRadius: 12, flexShrink: 0, overflow: 'hidden', border: '1px solid #4b5563', background: 'linear-gradient(135deg, #1e3a34, #134e3a)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24 }}>
+                  {editBooth.facadeImageUrl ? (
+                    <img src={editBooth.facadeImageUrl} alt="預覽" style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                      onError={e => { e.target.style.display = 'none'; e.target.parentElement.textContent = editBooth.emoji || '🏮'; }} />
+                  ) : (editBooth.emoji || '🏮')}
+                </div>
+              </div>
+              <p style={{ fontSize: 10, color: '#6b7280', marginTop: 4 }}>填了縮圖網址後，玩家會看到這張圖；留空則顯示上面的 Emoji。右邊小框是即時預覽。</p>
               <label style={labelStyle}>印章圖（噗浪圖床網址，留空用 emoji）</label>
-              <input value={editBooth.stampImageUrl} onChange={e => setEditBooth(prev => ({ ...prev, stampImageUrl: e.target.value }))} style={inputStyle} placeholder="https://images.plurk.com/stamp.png" />
+              <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+                <input value={editBooth.stampImageUrl} onChange={e => setEditBooth(prev => ({ ...prev, stampImageUrl: e.target.value }))} style={{ ...inputStyle, flex: 1 }} placeholder="https://images.plurk.com/stamp.png" />
+                {/* 印章即時預覽（圓形） */}
+                <div style={{ width: 56, height: 56, borderRadius: '50%', flexShrink: 0, overflow: 'hidden', border: '2px solid rgba(13,148,136,0.4)', background: 'linear-gradient(135deg, #1e3a34, #134e3a)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24 }}>
+                  {editBooth.stampImageUrl ? (
+                    <img src={editBooth.stampImageUrl} alt="印章預覽" style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                      onError={e => { e.target.style.display = 'none'; e.target.parentElement.textContent = editBooth.emoji || '🏮'; }} />
+                  ) : (editBooth.emoji || '🏮')}
+                </div>
+              </div>
 
               {/* 商品管理 */}
               <div style={{ marginTop: 20, borderTop: '1px solid #374151', paddingTop: 16 }}>
