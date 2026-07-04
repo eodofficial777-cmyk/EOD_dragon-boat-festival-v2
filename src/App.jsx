@@ -797,7 +797,7 @@ function AppInner() {
             <div style={{ flex: 1, minHeight: 0, zIndex: 5, position: 'relative', display: 'flex', flexDirection: 'column' }}>
               <TechDivider />
               <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
-                <RiverRaceTracker teams={userData.isDemo && raceTeams.length === 0 ? MOCK_RACE_TEAMS : raceTeams} onFlagClick={setZoomFlagUrl} isDemo={userData.isDemo} loading={raceLoading && !userData.isDemo} />
+                <RiverRaceTracker teams={userData.isDemo && raceTeams.length === 0 ? MOCK_RACE_TEAMS : raceTeams} onFlagClick={setZoomFlagUrl} isDemo={userData.isDemo} mockData={userData.isDemo && raceTeams.length === 0} loading={raceLoading && !userData.isDemo} />
               </div>
               <TechDivider flip />
             </div>
@@ -1317,15 +1317,16 @@ function calcRacePos(team) {
 // ============================================================
 // 河道賽況追蹤器（含第5點需求：每輪事件顯示）
 // ============================================================
-function RiverRaceTracker({ teams, onFlagClick, isDemo, loading }) {
+function RiverRaceTracker({ teams, onFlagClick, isDemo, mockData, loading }) {
   const [bursts, setBursts] = useState([]);   // 打氣噴發 {id, teamId, dx, rot}（可連點刷一排）
+  const [localCheers, setLocalCheers] = useState({}); // 試玩/預覽模式的本地計數（不寫入資料庫）
   const [collapsed, setCollapsed] = useState(window.innerWidth < 480 && teams.length > 3);
   const [events, setEvents] = useState([]);
   const isMobile = window.innerWidth < 640;
 
   // 監聽事件紀錄（RTDB: raceEvents/{timestamp}）
   useEffect(() => {
-    if (isDemo) { setEvents(MOCK_RACE_EVENTS); return; }
+    if (mockData) { setEvents(MOCK_RACE_EVENTS); return; }
     const evRef = ref(rtdb, 'raceEvents');
     const unsub = onValue(evRef, (snap) => {
       const v = snap.val() || {};
@@ -1336,13 +1337,15 @@ function RiverRaceTracker({ teams, onFlagClick, isDemo, loading }) {
       setEvents(list);
     });
     return () => unsub();
-  }, [isDemo]);
+  }, [mockData]);
 
   const doCheer = (teamId) => {
     const id = Date.now() + Math.random();
     setBursts(prev => [...prev.slice(-19), { id, teamId, dx: Math.floor(Math.random() * 44) - 22, rot: Math.floor(Math.random() * 44) - 22 }]);
     setTimeout(() => setBursts(prev => prev.filter(b => b.id !== id)), 1000);
-    if (!isDemo) {
+    if (isDemo) {
+      setLocalCheers(prev => ({ ...prev, [teamId]: (prev[teamId] || 0) + 1 }));
+    } else {
       runTransaction(ref(rtdb, `race/${teamId}/cheers`), (cur) => (Number(cur) || 0) + 1).catch(() => {});
     }
   };
@@ -1454,7 +1457,7 @@ function RiverRaceTracker({ teams, onFlagClick, isDemo, loading }) {
                 {/* 打氣 */}
                 <button onClick={() => doCheer(team.id)} style={{ display: 'flex', alignItems: 'center', gap: 3, padding: '3px 8px', clipPath: CUT(5), border: '1px solid rgba(194,65,12,0.3)', background: 'rgba(194,65,12,0.05)', cursor: 'pointer', flexShrink: 0 }}>
                   <Icon name="horn" size={11} color={C.red} />
-                  <span style={{ fontSize: 9, fontWeight: 900, color: C.red, fontFamily: 'monospace' }}>{team.cheers}</span>
+                  <span style={{ fontSize: 9, fontWeight: 900, color: C.red, fontFamily: 'monospace' }}>{team.cheers + (localCheers[team.id] || 0)}</span>
                 </button>
               </div>
 
