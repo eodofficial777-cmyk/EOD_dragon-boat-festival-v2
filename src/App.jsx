@@ -4,7 +4,7 @@ import { collection, doc, getDoc, getDocs, setDoc, updateDoc, addDoc, deleteDoc,
 import { ref, onValue, runTransaction, set as rtdbSet, remove as rtdbRemove } from 'firebase/database';
 import { signInWithPopup, signOut, onAuthStateChanged } from 'firebase/auth';
 
-// ★ 管理員 UID
+// 管理員 UID
 const ADMIN_UID = 'aYe1g9g27SViRei2gjAxTQmt5s13';
 
 // ============================================================
