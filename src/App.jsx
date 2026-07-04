@@ -1544,17 +1544,12 @@ function MiniSquareCard({ booth, stamped, onOpen }) {
 }
 
 function BoothPillRow({ booths, stamps, onOpen, side }) {
-  // 以攤位 id 做穩定的偽隨機排序（每次載入順序一致、不需 useMemo）
-  const shuffled = [...booths].sort((a, b) => {
-    const h = (s) => { let x = 0; for (let i = 0; i < s.length; i++) x = (x * 31 + s.charCodeAt(i)) % 9973; return x; };
-    return h(String(a.id)) - h(String(b.id));
-  });
-  if (shuffled.length === 0) return null;
+  if (booths.length === 0) return null;
   return (
     <div style={{ flexShrink: 0, padding: side === 'top' ? '10px 12px 6px' : '6px 12px 10px', display: 'flex', overflowX: 'auto', zIndex: 6, position: 'relative' }}>
       {/* 內層 margin auto：塞得下就置中，塞不下就左右捲動 */}
       <div style={{ display: 'flex', gap: 10, margin: '0 auto', padding: '0 4px' }}>
-        {shuffled.map(b => <MiniSquareCard key={b.id} booth={b} stamped={stamps.includes(b.id)} onOpen={onOpen} />)}
+        {booths.map(b => <MiniSquareCard key={b.id} booth={b} stamped={stamps.includes(b.id)} onOpen={onOpen} />)}
       </div>
     </div>
   );
