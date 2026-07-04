@@ -160,7 +160,7 @@ const RACE_EVENTS = [
 // 預設攤位（試玩模式 fallback）
 const DEFAULT_BOOTHS = [
   {
-    id: 'booth-demo-1', side: 'top', name: '示範攤位（上排）', emoji: '🍱',
+    id: 'booth-demo-1', side: 'top', name: '示範攤位（上排）', ownerName: '示範攤主．阿粽', emoji: '🍱',
     stamp: { imageUrl: '' },
     stampHint: '這是沒上傳印章時的預設樣式。攤主可上傳自製印章圖到噗浪，貼上圖床網址即可替換。',
     facadeImageUrl: '',
@@ -174,7 +174,7 @@ const DEFAULT_BOOTHS = [
     stats: { stampCount: 12, salesCount: 8, salesRevenue: 360 },
   },
   {
-    id: 'booth-demo-2', side: 'top', name: '小遊戲攤位', emoji: '🎮',
+    id: 'booth-demo-2', side: 'top', name: '小遊戲攤位', ownerName: '示範攤主．小龍', emoji: '🎮',
     stamp: { imageUrl: '' },
     stampHint: '建議製作 300×300 以上、去背 PNG 的印章圖，上傳噗浪後把圖床網址填到 stampImageUrl 欄位。',
     facadeImageUrl: '',
@@ -187,7 +187,7 @@ const DEFAULT_BOOTHS = [
     stats: { stampCount: 5, salesCount: 2, salesRevenue: 200 },
   },
   {
-    id: 'booth-demo-3', side: 'bottom', name: '創作展示攤', emoji: '🎨',
+    id: 'booth-demo-3', side: 'bottom', name: '創作展示攤', ownerName: '示範攤主．艾草', emoji: '🎨',
     stamp: { imageUrl: '' },
     stampHint: '沒有自訂印章的攤位會用 emoji 或燈籠線條圖當作印章圖案。',
     facadeImageUrl: '',
@@ -820,6 +820,11 @@ function AppInner() {
               <div style={{ position: 'relative', zIndex: 2 }}>
                 <p style={{ fontSize: 10, fontWeight: 700, color: 'rgba(255,255,255,0.55)', letterSpacing: 3, textTransform: 'uppercase', marginBottom: 4 }}>BOOTH / 攤位</p>
                 <h2 style={{ fontSize: 27, fontWeight: 900, color: '#fff', fontFamily: '"Noto Serif TC", serif', letterSpacing: 1 }}>{selectedBooth.emoji ? selectedBooth.emoji + ' ' : ''}{selectedBooth.name}</h2>
+                {selectedBooth.ownerName && (
+                  <p style={{ marginTop: 7, display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 800, color: 'rgba(255,255,255,0.9)', background: 'rgba(255,255,255,0.12)', border: '1px solid rgba(255,255,255,0.22)', clipPath: CUT(6), padding: '4px 12px', letterSpacing: 1 }}>
+                    <Icon name="user" size={12} color="rgba(255,255,255,0.9)" /> 攤主：{selectedBooth.ownerName}
+                  </p>
+                )}
               </div>
             </div>
 
@@ -999,129 +1004,71 @@ function AppInner() {
         @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.5} }
         @keyframes cheerFloat { 0%{opacity:1;transform:translateY(0)} 100%{opacity:0;transform:translateY(-50px) scale(1.4)} }
         @keyframes boatRock { 0%,100%{transform:rotate(-8deg) translateY(0)} 50%{transform:rotate(8deg) translateY(-4px)} }
+        .riverWater { background-image: radial-gradient(circle at 10px -5px, transparent 8px, rgba(255,255,255,0.5) 8.5px, transparent 10.5px); background-size: 22px 11px; animation: waterFlow 2.8s linear infinite; pointer-events: none; }
+        @keyframes waterFlow { from{background-position:0 0} to{background-position:-44px 0} }
+        @keyframes bagDrop { 0%{transform:translateY(-440px) rotate(-6deg);opacity:0} 10%{opacity:1} 80%{transform:translateY(7px) rotate(1deg)} 100%{transform:translateY(0) rotate(0)} }
       `}</style>
     </div>
   );
 }
 
 // ============================================================
-// 物理購物袋（第3點需求）
-// 商品購買後會「掉進」袋子裡，可以拖曳、丟擲、互相碰撞
+// 茄芷袋購物袋（改版：無物理碰撞）
+// 商品購買後會「掉進」袋子排整齊，玩家可自由拖曳擺到喜歡的位置
+// 點一下商品（不拖動）會開啟商品小卡
 // ============================================================
 function PhysicsBag({ inventory, booths }) {
   const areaRef = useRef(null);
-  const bodiesRef = useRef([]);
   const dragRef = useRef(null);
-  const rafRef = useRef(null);
-  const [bodyIds, setBodyIds] = useState([]);
-  const [dropKey, setDropKey] = useState(0);
+  const posRef = useRef({});                 // 記住玩家擺放的位置（本次瀏覽期間）
+  const [placed, setPlaced] = useState([]);  // {key, item, x, y, rot, delay, hasSaved}
   const [detail, setDetail] = useState(null);
+  const [dropKey, setDropKey] = useState(0);
 
+  const BODY = 92;
+  const NAVY = '#1e3a8a';
   const totalSpent = inventory.reduce((s, it) => s + (Number(it.price) || 0), 0);
-  const BODY = 92;          // 每個物品的視覺尺寸（px）
-  const R = BODY / 2;
-
   const findEmoji = (item) => (booths.find(b => b.id === item.boothId || b.name === item.boothName) || {}).emoji || '';
 
-  // 生成物體（從袋口上方依序掉落）
+  // 預設落點：由袋底往上、逐排置中排整齊
   useEffect(() => {
     const area = areaRef.current;
     const W = area ? area.clientWidth : 320;
-    bodiesRef.current = inventory.map((item, i) => ({
-      id: 'b' + i,
-      item,
-      r: R,
-      x: R + 14 + Math.random() * Math.max(10, W - 2 * (R + 14)),
-      y: -R - i * (BODY + 30) - 20,
-      vx: (Math.random() - 0.5) * 3,
-      vy: 0,
-      rot: (Math.random() - 0.5) * 26,
-      vr: (Math.random() - 0.5) * 3,
-      node: null,
+    const H = area ? area.clientHeight : 360;
+    const cols = Math.max(1, Math.floor((W - 12) / (BODY - 4)));
+    setPlaced(inventory.map((item, i) => {
+      const key = String(item.id ?? 'it') + '_' + i;
+      const col = i % cols, row = Math.floor(i / cols);
+      const rowCount = Math.min(inventory.length - row * cols, cols);
+      const startX = Math.max(6, (W - rowCount * (BODY - 4)) / 2) + (BODY - 4) / 2;
+      const def = {
+        x: startX + col * (BODY - 4),
+        y: Math.max(BODY / 2, H - 10 - BODY / 2 - row * (BODY - 14)),
+      };
+      const saved = posRef.current[key];
+      return { key, item, rot: ((i * 53) % 11) - 5, delay: i * 0.13, hasSaved: !!saved, ...(saved || def) };
     }));
-    setBodyIds(bodiesRef.current.map(b => b.id));
   }, [inventory, dropKey]);
 
-  // 物理迴圈：重力、牆壁/袋底反彈、圓形碰撞
-  useEffect(() => {
-    const step = () => {
-      const area = areaRef.current;
-      if (area) {
-        const W = area.clientWidth, H = area.clientHeight;
-        const bodies = bodiesRef.current;
-        const GRAV = 0.55, REST = 0.38, FRIC = 0.996;
-        bodies.forEach(b => {
-          const dragging = dragRef.current && dragRef.current.id === b.id;
-          if (!dragging) {
-            b.vy += GRAV; b.vx *= FRIC; b.vr *= 0.985;
-            b.x += b.vx; b.y += b.vy; b.rot += b.vr;
-            if (b.x < b.r + 4) { b.x = b.r + 4; b.vx = Math.abs(b.vx) * REST; b.vr -= b.vy * 0.15; }
-            if (b.x > W - b.r - 4) { b.x = W - b.r - 4; b.vx = -Math.abs(b.vx) * REST; b.vr += b.vy * 0.15; }
-            if (b.y > H - b.r - 8) {
-              b.y = H - b.r - 8;
-              if (Math.abs(b.vy) > 1.2) b.vy = -Math.abs(b.vy) * REST; else b.vy = 0;
-              b.vx *= 0.92;
-              b.rot += (Math.round(b.rot / 12) * 12 - b.rot) * 0.08; // 落地後慢慢擺正一點
-            }
-            if (b.y < -600) b.y = -600;
-          }
-        });
-        // 兩兩碰撞
-        for (let i = 0; i < bodies.length; i++) {
-          for (let j = i + 1; j < bodies.length; j++) {
-            const a = bodies[i], c = bodies[j];
-            const dx = c.x - a.x, dy = c.y - a.y;
-            const d = Math.hypot(dx, dy) || 0.01;
-            const minD = a.r + c.r - 14; // 允許些微重疊，堆起來比較可愛
-            if (d < minD) {
-              const nx = dx / d, ny = dy / d, overlap = (minD - d) / 2;
-              const aDrag = dragRef.current && dragRef.current.id === a.id;
-              const cDrag = dragRef.current && dragRef.current.id === c.id;
-              if (!aDrag) { a.x -= nx * overlap * (cDrag ? 2 : 1); a.y -= ny * overlap * (cDrag ? 2 : 1); }
-              if (!cDrag) { c.x += nx * overlap * (aDrag ? 2 : 1); c.y += ny * overlap * (aDrag ? 2 : 1); }
-              const rvx = c.vx - a.vx, rvy = c.vy - a.vy;
-              const vn = rvx * nx + rvy * ny;
-              if (vn < 0) {
-                const imp = -(1 + 0.25) * vn / 2;
-                if (!aDrag) { a.vx -= imp * nx; a.vy -= imp * ny; a.vr -= imp * 0.4; }
-                if (!cDrag) { c.vx += imp * nx; c.vy += imp * ny; c.vr += imp * 0.4; }
-              }
-            }
-          }
-        }
-        bodies.forEach(b => {
-          if (b.node) b.node.style.transform = `translate(${b.x - b.r}px, ${b.y - b.r}px) rotate(${b.rot}deg)`;
-        });
-      }
-      rafRef.current = requestAnimationFrame(step);
-    };
-    rafRef.current = requestAnimationFrame(step);
-    return () => cancelAnimationFrame(rafRef.current);
-  }, []);
-
-  // 拖曳（滑鼠 / 觸控通用），放開時保留速度變成丟擲
-  const onPointerDown = (e, id) => {
+  // 拖曳（滑鼠/觸控通用）；移動距離很小視為點擊 → 開詳情
+  const onPointerDown = (e, key) => {
     e.preventDefault();
     const area = areaRef.current; if (!area) return;
     const rect = area.getBoundingClientRect();
-    const b = bodiesRef.current.find(x => x.id === id); if (!b) return;
-    dragRef.current = { id, lastX: e.clientX, lastY: e.clientY, t: performance.now(), moved: 0 };
-    b.vx = 0; b.vy = 0; b.vr = 0;
+    const target = placed.find(p => p.key === key); if (!target) return;
+    dragRef.current = { key, moved: 0, lastX: e.clientX, lastY: e.clientY };
     const move = (ev) => {
       const d = dragRef.current; if (!d) return;
-      const now = performance.now(); const dt = Math.max(1, now - d.t);
-      b.vx = (ev.clientX - d.lastX) / dt * 14;
-      b.vy = (ev.clientY - d.lastY) / dt * 14;
       d.moved += Math.abs(ev.clientX - d.lastX) + Math.abs(ev.clientY - d.lastY);
-      d.lastX = ev.clientX; d.lastY = ev.clientY; d.t = now;
-      b.x = Math.max(b.r, Math.min(rect.width - b.r, ev.clientX - rect.left));
-      b.y = Math.max(-b.r, Math.min(rect.height - b.r - 8, ev.clientY - rect.top));
-      b.vr = b.vx * 0.5;
-      if (b.node) b.node.style.transform = `translate(${b.x - b.r}px, ${b.y - b.r}px) rotate(${b.rot}deg)`;
+      d.lastX = ev.clientX; d.lastY = ev.clientY;
+      const x = Math.max(BODY / 2, Math.min(rect.width - BODY / 2, ev.clientX - rect.left));
+      const y = Math.max(BODY / 2, Math.min(rect.height - BODY / 2 + 6, ev.clientY - rect.top));
+      posRef.current[key] = { x, y };
+      setPlaced(prev => prev.map(p => p.key === key ? { ...p, x, y, hasSaved: true } : p));
     };
     const up = () => {
       const d = dragRef.current;
-      if (d && d.moved < 6) setDetail(b.item);  // 幾乎沒移動 → 視為點擊，開商品小卡
+      if (d && d.moved < 6) setDetail(target.item);
       dragRef.current = null;
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
@@ -1131,85 +1078,91 @@ function PhysicsBag({ inventory, booths }) {
   };
 
   return (
-    <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '18px 20px', animation: 'fadeSlideUp 0.5s ease-out' }}>
-      <div style={{ width: '100%', maxWidth: 430, height: '92%', display: 'flex', flexDirection: 'column', position: 'relative' }}>
+    <div style={{ height: '100%', display: 'flex', alignItems: 'stretch', justifyContent: 'center', padding: '10px 20px 14px', animation: 'fadeSlideUp 0.5s ease-out' }}>
+      <div style={{ width: '100%', maxWidth: 430, display: 'flex', flexDirection: 'column', position: 'relative' }}>
 
-        {/* 提袋提把 */}
-        <div style={{ height: 44, display: 'flex', justifyContent: 'center', flexShrink: 0 }}>
-          <div style={{ width: 120, height: 60, border: `3px solid rgba(183,121,31,0.45)`, borderBottom: 'none', borderRadius: '30px 30px 0 0', marginBottom: -18 }} />
+        {/* 資訊列 */}
+        <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '8px 12px', background: C.paper, clipPath: CUT(8), border: `1px solid ${C.line}`, marginBottom: 4 }}>
+          <div>
+            <h2 style={{ fontSize: 15, fontWeight: 900, fontFamily: '"Noto Serif TC", serif', letterSpacing: 3 }}>購物袋</h2>
+            <p style={{ fontSize: 8, fontWeight: 700, color: '#8a9a90', letterSpacing: 1, marginTop: 1 }}>{inventory.length} 個戰利品・拖曳可自由擺放</p>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 4, background: C.goldBg, padding: '5px 10px', clipPath: CUT(6), border: '1px solid rgba(183,121,31,0.3)' }}>
+              <Icon name="coin" size={12} color={C.gold} />
+              <span style={{ fontSize: 12, fontWeight: 900, color: '#8a5a12', fontFamily: 'monospace' }}>總消費 ${totalSpent}</span>
+            </span>
+            <button onClick={() => { posRef.current = {}; setDropKey(k => k + 1); }} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '5px 10px', clipPath: CUT(6), border: `1px solid ${C.line}`, background: C.paper, fontSize: 10, fontWeight: 800, color: C.ink, cursor: 'pointer' }}>
+              <Icon name="refresh" size={11} /> 排整齊
+            </button>
+          </div>
         </div>
 
-        {/* 袋身 */}
-        <div style={{
-          flex: 1, minHeight: 0, position: 'relative', display: 'flex', flexDirection: 'column',
-          background: `linear-gradient(180deg, ${C.paper}, #f7efdc)`,
-          clipPath: 'polygon(3% 0, 97% 0, 100% 100%, 0 100%)',
-          border: `1.5px solid rgba(183,121,31,0.35)`,
-        }}>
-          {/* 袋口資訊列 */}
-          <div style={{ flexShrink: 0, padding: '16px 22px 10px', borderBottom: `1px dashed rgba(183,121,31,0.3)`, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
-            <div>
-              <h2 style={{ fontSize: 19, fontWeight: 900, fontFamily: '"Noto Serif TC", serif', letterSpacing: 4, color: '#7a5417' }}>購物袋</h2>
-              <p style={{ fontSize: 9, fontWeight: 700, color: 'rgba(138,90,18,0.55)', letterSpacing: 2, marginTop: 2 }}>已收集 {inventory.length} 個戰利品・可以拖曳把玩</p>
-            </div>
-            <div style={{ textAlign: 'right' }}>
-              <p style={{ fontSize: 9, fontWeight: 800, color: 'rgba(138,90,18,0.6)', letterSpacing: 2 }}>總消費</p>
-              <p style={{ fontSize: 20, fontWeight: 900, color: '#8a5a12', fontFamily: 'monospace', lineHeight: 1, display: 'flex', alignItems: 'center', gap: 4, justifyContent: 'flex-end' }}>
-                <Icon name="coin" size={15} color={C.gold} />${totalSpent}
-              </p>
-            </div>
-          </div>
+        {/* 提把（茄芷袋深藍織帶） */}
+        <div style={{ height: 46, position: 'relative', flexShrink: 0, zIndex: 0 }}>
+          <div style={{ position: 'absolute', left: '50%', transform: 'translateX(-50%)', bottom: -8, width: '44%', height: 56, border: '8px solid rgba(30,58,138,0.35)', borderBottom: 'none', borderRadius: '28px 28px 0 0' }} />
+          <div style={{ position: 'absolute', left: '50%', transform: 'translateX(-50%)', bottom: -16, width: '52%', height: 62, border: `10px solid ${NAVY}`, borderBottom: 'none', borderRadius: '32px 32px 0 0' }} />
+        </div>
 
-          {/* 物理區 */}
-          <div ref={areaRef} style={{ flex: 1, minHeight: 0, position: 'relative', overflow: 'hidden', touchAction: 'none' }}>
+        {/* 袋身（紅藍綠條紋網布） */}
+        <div style={{
+          flex: 1, minHeight: 0, position: 'relative', overflow: 'hidden',
+          clipPath: 'polygon(3% 0, 97% 0, 100% 100%, 0 100%)',
+          border: '1px solid rgba(30,58,138,0.3)',
+          background: `repeating-linear-gradient(180deg,
+            #d95555 0px 30px,  #f5f2e8 30px 33px,
+            #3b78d8 33px 63px, #f5f2e8 63px 66px,
+            #45a049 66px 96px, #f5f2e8 96px 99px)`,
+        }}>
+          {/* 網布紋理 */}
+          <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', opacity: 0.55, backgroundImage: 'linear-gradient(rgba(255,255,255,0.3) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.3) 1px, transparent 1px)', backgroundSize: '3px 3px' }} />
+          {/* 直向織帶（對齊提把兩端） */}
+          <div style={{ position: 'absolute', top: 0, bottom: 0, left: 'calc(24% - 10px)', width: 20, background: NAVY, zIndex: 1, boxShadow: 'inset 2px 0 0 rgba(255,255,255,0.15), inset -2px 0 0 rgba(0,0,0,0.2)' }} />
+          <div style={{ position: 'absolute', top: 0, bottom: 0, right: 'calc(24% - 10px)', width: 20, background: NAVY, zIndex: 1, boxShadow: 'inset 2px 0 0 rgba(255,255,255,0.15), inset -2px 0 0 rgba(0,0,0,0.2)' }} />
+          {/* 紅色袋口滾邊 */}
+          <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 12, background: '#d0453c', borderBottom: '2px solid #f5f2e8', zIndex: 2 }} />
+          {/* 側邊小布標 */}
+          <div style={{ position: 'absolute', right: 8, top: 76, zIndex: 2, background: '#d0453c', color: '#fff', fontSize: 7, fontWeight: 900, letterSpacing: 2, padding: '5px 3px', writingMode: 'vertical-rl', border: '1px solid rgba(255,255,255,0.5)' }}>盛夏慶典</div>
+
+          {/* 商品擺放區 */}
+          <div ref={areaRef} style={{ position: 'absolute', inset: '14px 0 0 0', touchAction: 'none', zIndex: 3 }}>
             {inventory.length === 0 && (
-              <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'rgba(138,90,18,0.35)', fontWeight: 700, fontSize: 13, gap: 10 }}>
-                <Icon name="bag" size={44} color="rgba(138,90,18,0.25)" />
-                購物袋還是空的...
-                <span style={{ fontSize: 10, fontWeight: 600 }}>去攤位逛逛，買到的商品會掉進來喔</span>
+              <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, pointerEvents: 'none' }}>
+                <div style={{ background: 'rgba(253,252,246,0.92)', clipPath: CUT(8), border: `1px solid ${C.line}`, padding: '14px 20px', textAlign: 'center' }}>
+                  <Icon name="bag" size={34} color="#8a9a90" style={{ margin: '0 auto 6px' }} />
+                  <p style={{ fontSize: 12, fontWeight: 800, color: '#57534e' }}>茄芷袋還是空的...</p>
+                  <p style={{ fontSize: 9, fontWeight: 600, color: '#8a9a90', marginTop: 2 }}>去攤位逛逛，買到的商品會掉進來喔</p>
+                </div>
               </div>
             )}
-            {bodyIds.map((id) => {
-              const b = bodiesRef.current.find(x => x.id === id);
-              if (!b) return null;
-              const emoji = findEmoji(b.item);
+            {placed.map(p => {
+              const emoji = findEmoji(p.item);
               return (
-                <div key={id + '_' + dropKey}
-                  ref={el => { b.node = el; }}
-                  onPointerDown={(e) => onPointerDown(e, id)}
-                  style={{
-                    position: 'absolute', top: 0, left: 0, width: BODY, height: BODY,
-                    cursor: 'grab', touchAction: 'none', willChange: 'transform',
-                    display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-                    userSelect: 'none', WebkitUserSelect: 'none',
-                  }}>
-                  {/* 商品圖：去背 PNG 會直接浮在袋子裡；沒圖用禮物線圖/攤位 emoji */}
-                  <div style={{ width: BODY - 34, height: BODY - 34, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', filter: 'drop-shadow(0 3px 5px rgba(90,60,20,0.28))' }}>
-                    {b.item.imageUrl
-                      ? <img src={b.item.imageUrl} alt="" draggable={false} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} onError={e => { e.target.style.display = 'none'; }} />
-                      : (emoji ? <span style={{ fontSize: 38 }}>{emoji}</span> : <Icon name="gift" size={40} color="#a0742c" />)}
-                  </div>
-                  <div style={{ pointerEvents: 'none', textAlign: 'center', marginTop: 2, background: 'rgba(253,252,246,0.85)', clipPath: CUT(4), padding: '2px 7px', border: `1px solid rgba(183,121,31,0.25)` }}>
-                    <p style={{ fontSize: 9, fontWeight: 800, color: '#5c4310', lineHeight: 1.2, maxWidth: BODY - 6, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.item.name}</p>
-                    <p style={{ fontSize: 7, fontWeight: 700, color: 'rgba(122,84,23,0.65)', maxWidth: BODY - 6, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.item.boothName || ''}</p>
+                <div key={p.key + '_' + dropKey}
+                  onPointerDown={(e) => onPointerDown(e, p.key)}
+                  style={{ position: 'absolute', left: p.x - BODY / 2, top: p.y - BODY / 2, width: BODY, height: BODY, cursor: 'grab', touchAction: 'none', userSelect: 'none', WebkitUserSelect: 'none' }}>
+                  <div style={{ width: '100%', height: '100%', animation: p.hasSaved ? 'none' : `bagDrop 0.75s cubic-bezier(0.25,1.1,0.4,1) ${p.delay}s both` }}>
+                    <div style={{ width: '100%', height: '100%', transform: `rotate(${p.rot}deg)`, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+                      <div style={{ width: BODY - 34, height: BODY - 34, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', filter: 'drop-shadow(0 3px 5px rgba(20,20,40,0.35))' }}>
+                        {p.item.imageUrl
+                          ? <img src={p.item.imageUrl} alt="" draggable={false} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} onError={e => { e.target.style.display = 'none'; }} />
+                          : (emoji ? <span style={{ fontSize: 38 }}>{emoji}</span> : <Icon name="gift" size={40} color="#fdf6e3" sw={1.9} />)}
+                      </div>
+                      <div style={{ pointerEvents: 'none', textAlign: 'center', marginTop: 2, background: 'rgba(253,252,246,0.94)', clipPath: CUT(4), padding: '2px 7px', border: `1px solid rgba(30,58,138,0.3)` }}>
+                        <p style={{ fontSize: 9, fontWeight: 800, color: '#33415c', lineHeight: 1.2, maxWidth: BODY - 6, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.item.name}</p>
+                        <p style={{ fontSize: 7, fontWeight: 700, color: 'rgba(51,65,92,0.6)', maxWidth: BODY - 6, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.item.boothName || ''}</p>
+                      </div>
+                    </div>
                   </div>
                 </div>
               );
             })}
           </div>
-
-          {/* 袋底 */}
-          <div style={{ flexShrink: 0, padding: '8px 20px 12px', textAlign: 'center', borderTop: `1px dashed rgba(183,121,31,0.3)`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <p style={{ fontSize: 8, fontWeight: 800, color: 'rgba(138,90,18,0.3)', letterSpacing: 3, textTransform: 'uppercase' }}>Thank you for visiting</p>
-            <button onClick={() => setDropKey(k => k + 1)} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '5px 12px', clipPath: CUT(6), border: '1px solid rgba(183,121,31,0.35)', background: 'rgba(253,252,246,0.8)', fontSize: 10, fontWeight: 800, color: '#8a5a12', cursor: 'pointer' }}>
-              <Icon name="refresh" size={11} /> 重新倒入
-            </button>
-          </div>
         </div>
 
-        {/* 商品詳情小卡（點一下商品開啟） */}
+        {/* 商品詳情小卡 */}
         {detail && (
-          <div onClick={() => setDetail(null)} style={{ position: 'absolute', inset: 0, zIndex: 20, background: 'rgba(30,20,5,0.45)', backdropFilter: 'blur(3px)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', animation: 'fadeIn 0.2s' }}>
+          <div onClick={() => setDetail(null)} style={{ position: 'absolute', inset: 0, zIndex: 20, background: 'rgba(20,25,45,0.5)', backdropFilter: 'blur(3px)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', animation: 'fadeIn 0.2s' }}>
             <div onClick={e => e.stopPropagation()} style={{ position: 'relative', width: '82%', maxWidth: 280, background: C.paper, clipPath: CUT(14), padding: '24px 20px 18px', textAlign: 'center', cursor: 'default', animation: 'zoomIn 0.25s cubic-bezier(0.16,1,0.3,1)' }}>
               <Corners size={10} inset={5} color={C.gold} />
               <div style={{ height: 90, display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 10 }}>
@@ -1499,18 +1452,28 @@ function RiverRaceTracker({ teams, onFlagClick, isDemo, loading }) {
               </div>
 
               {/* 河道 */}
-              <div style={{ position: 'relative', height: 22, background: 'linear-gradient(180deg, #dcefe9, #cfe8df)', clipPath: CUT(5), border: `1px solid ${C.tealDim}`, overflow: 'hidden' }}>
-                <div style={{ position: 'absolute', inset: 0, opacity: 0.35, backgroundImage: 'repeating-linear-gradient(90deg, transparent 0 18px, rgba(13,148,136,0.25) 18px 19px)' }} />
-                {/* 折返旗 */}
-                <span style={{ position: 'absolute', right: 5, top: '50%', transform: 'translateY(-50%)' }}>
-                  <Icon name="flag" size={12} color={pos.phase === 'turn' ? C.red : '#8a9a90'} />
+              <div style={{ position: 'relative', height: 27, clipPath: CUT(5), border: `1px solid ${C.tealDim}`, overflow: 'hidden', background: 'linear-gradient(180deg, #cdeef2 0%, #9cd4de 45%, #7fc4d2 100%)' }}>
+                {/* 兩岸（沙洲＋草邊） */}
+                <span style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 4, background: '#e6dcae', borderBottom: '1px solid rgba(120,150,60,0.55)' }} />
+                <span style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 4, background: '#e6dcae', borderTop: '1px solid rgba(120,150,60,0.55)' }} />
+                {/* 流動水波 */}
+                <span className="riverWater" style={{ position: 'absolute', inset: '4px 0', opacity: 0.9 }} />
+                <span className="riverWater" style={{ position: 'absolute', inset: '4px 0', opacity: 0.45, transform: 'translateY(4px)', animationDuration: '3.8s', animationDirection: 'reverse' }} />
+                {/* 水色深淺 */}
+                <span style={{ position: 'absolute', inset: '4px 0', background: 'linear-gradient(90deg, rgba(255,255,255,0.25), transparent 30%, transparent 70%, rgba(13,90,110,0.12))' }} />
+                {/* 折返浮標旗 */}
+                <span style={{ position: 'absolute', right: 5, top: '50%', transform: 'translateY(-56%)' }}>
+                  <Icon name="flag" size={12} color={pos.phase === 'turn' ? C.red : '#57727a'} />
+                  <span style={{ position: 'absolute', left: 1, bottom: -3, width: 9, height: 3, borderRadius: '50%', background: 'rgba(255,255,255,0.55)' }} />
                 </span>
                 {/* 起/終點線 */}
-                <span style={{ position: 'absolute', left: 3, top: 2, bottom: 2, width: 2, background: 'repeating-linear-gradient(180deg, #123f30 0 3px, transparent 3px 6px)' }} />
-                {/* 龍舟 */}
+                <span style={{ position: 'absolute', left: 3, top: 4, bottom: 4, width: 2, background: 'repeating-linear-gradient(180deg, #123f30 0 3px, rgba(255,255,255,0.7) 3px 6px)' }} />
+                {/* 龍舟＋船尾水痕 */}
                 <span style={{ position: 'absolute', top: '50%', left: `calc(6px + ${pos.pct} * (100% - 40px))`, transform: 'translateY(-50%)', transition: 'left 1.2s cubic-bezier(0.34,1.2,0.5,1)' }}>
-                  <span style={{ display: 'inline-block', transform: `scaleX(${heading ? -1 : 1})`, animation: 'boatRock 1.6s ease-in-out infinite' }}>
-                    <Icon name="boat" size={isMobile ? 17 : 21} color={team.color || C.ink} sw={2} />
+                  <span style={{ display: 'inline-block', position: 'relative', transform: `scaleX(${heading ? -1 : 1})`, animation: 'boatRock 1.6s ease-in-out infinite' }}>
+                    <span style={{ position: 'absolute', left: -13, top: '58%', opacity: 0.85 }}><Icon name="wave" size={11} color="rgba(255,255,255,0.9)" sw={2} /></span>
+                    <span style={{ position: 'absolute', left: -22, top: '48%', opacity: 0.45 }}><Icon name="wave" size={9} color="rgba(255,255,255,0.9)" sw={2} /></span>
+                    <Icon name="boat" size={isMobile ? 18 : 22} color={team.color || C.ink} sw={2} />
                   </span>
                 </span>
               </div>
@@ -1532,27 +1495,38 @@ function RiverRaceTracker({ teams, onFlagClick, isDemo, loading }) {
 }
 
 // ============================================================
-// 攤位列（上下兩排，切角小卡）
+// 攤位列（白色帳篷小卡，置中排列）
 // ============================================================
 function MiniSquareCard({ booth, stamped, onOpen }) {
   return (
-    <button onClick={() => onOpen(booth)} style={{
-      position: 'relative', width: 100, flexShrink: 0, border: `1px solid ${C.line}`,
-      background: C.paper, clipPath: CUT(12), cursor: 'pointer', padding: 0,
-      textAlign: 'center', overflow: 'hidden',
-    }}>
-      <div style={{ height: 68, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 30, background: 'linear-gradient(160deg, rgba(13,148,136,0.06), rgba(18,63,48,0.03))', overflow: 'hidden', position: 'relative' }}>
+    <button onClick={() => onOpen(booth)} style={{ position: 'relative', width: 106, flexShrink: 0, background: 'transparent', border: 'none', cursor: 'pointer', padding: 0 }}>
+      {/* 帳篷頂棚（白色遮陽棚 + 波浪垂邊 + 頂端三角旗） */}
+      <svg viewBox="0 0 106 34" width="106" height="34" style={{ display: 'block', overflow: 'visible', filter: 'drop-shadow(0 2px 2px rgba(18,63,48,0.14))' }}>
+        <path d="M53 10 V3 l8 2.4 -8 2.4" fill={C.teal} stroke="none" />
+        <path d="M7 29 L17 12 Q53 4 89 12 L99 29
+                 a5.75 5 0 0 1 -11.5 0 a5.75 5 0 0 1 -11.5 0 a5.75 5 0 0 1 -11.5 0 a5.75 5 0 0 1 -11.5 0
+                 a5.75 5 0 0 1 -11.5 0 a5.75 5 0 0 1 -11.5 0 a5.75 5 0 0 1 -11.5 0 a5.75 5 0 0 1 -11.5 0 Z"
+          fill="#ffffff" stroke="rgba(18,63,48,0.3)" strokeWidth="1.2" />
+        <path d="M31 9 L27 29 M53 7 V29 M75 9 L79 29" stroke="rgba(18,63,48,0.1)" strokeWidth="1" fill="none" />
+      </svg>
+      {/* 攤位本體（白帳篷 + 兩側支柱） */}
+      <div style={{ height: 56, margin: '0 6px', background: '#fff', borderLeft: '3px solid #ddd6c2', borderRight: '3px solid #ddd6c2', borderBottom: `1px solid ${C.line}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 28, overflow: 'hidden', position: 'relative' }}>
         {booth.facadeImageUrl
           ? <img src={booth.facadeImageUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={e => { e.target.style.display = 'none'; e.target.parentElement.textContent = booth.emoji || '🏮'; }} />
-          : (booth.emoji || <Icon name="lantern" size={28} color={C.teal} />)}
+          : (booth.emoji || <Icon name="lantern" size={26} color={C.teal} />)}
         {stamped && (
           <span style={{ position: 'absolute', top: 4, right: 4, width: 18, height: 18, clipPath: CUT(4), background: C.teal, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <Icon name="check" size={11} color="#fff" sw={2.6} />
           </span>
         )}
       </div>
-      <div style={{ padding: '5px 6px 7px', borderTop: `1px solid ${C.line}`, background: stamped ? 'rgba(13,148,136,0.06)' : C.paper }}>
-        <p style={{ fontSize: 10, fontWeight: 800, color: C.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{booth.name}</p>
+      {/* 吊掛攤位牌（攤名放這裡） */}
+      <div style={{ position: 'relative', margin: '0 14px', paddingTop: 6 }}>
+        <span style={{ position: 'absolute', top: 0, left: '20%', width: 1.5, height: 6, background: 'rgba(18,63,48,0.4)' }} />
+        <span style={{ position: 'absolute', top: 0, right: '20%', width: 1.5, height: 6, background: 'rgba(18,63,48,0.4)' }} />
+        <div style={{ position: 'relative', background: stamped ? 'rgba(13,148,136,0.08)' : '#fff', border: `1px solid ${stamped ? C.tealDim : C.line}`, clipPath: CUT(6), padding: '4px 5px 5px' }}>
+          <p style={{ fontSize: 10, fontWeight: 800, color: C.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{booth.name}</p>
+        </div>
       </div>
     </button>
   );
@@ -1566,8 +1540,11 @@ function BoothPillRow({ booths, stamps, onOpen, side }) {
   });
   if (shuffled.length === 0) return null;
   return (
-    <div style={{ flexShrink: 0, padding: side === 'top' ? '10px 12px 8px' : '8px 12px 10px', display: 'flex', gap: 9, overflowX: 'auto', zIndex: 6, position: 'relative' }}>
-      {shuffled.map(b => <MiniSquareCard key={b.id} booth={b} stamped={stamps.includes(b.id)} onOpen={onOpen} />)}
+    <div style={{ flexShrink: 0, padding: side === 'top' ? '10px 12px 6px' : '6px 12px 10px', display: 'flex', overflowX: 'auto', zIndex: 6, position: 'relative' }}>
+      {/* 內層 margin auto：塞得下就置中，塞不下就左右捲動 */}
+      <div style={{ display: 'flex', gap: 10, margin: '0 auto', padding: '0 4px' }}>
+        {shuffled.map(b => <MiniSquareCard key={b.id} booth={b} stamped={stamps.includes(b.id)} onOpen={onOpen} />)}
+      </div>
     </div>
   );
 }
@@ -1761,7 +1738,7 @@ function AdminPanel({ adminUser, onLogout, db, rtdb }) {
   }, [rtdb]);
 
   // ---------- 攤位 ----------
-  const blankBooth = () => ({ id: '', name: '', emoji: '🏮', side: 'top', description: '', plurkUrl: '', task: '', stampImageUrl: '', facadeImageUrl: '', stampHint: '', items: [] });
+  const blankBooth = () => ({ id: '', name: '', ownerName: '', emoji: '🏮', side: 'top', description: '', plurkUrl: '', task: '', stampImageUrl: '', facadeImageUrl: '', stampHint: '', items: [] });
   const saveBooth = async () => {
     if (!editing.name.trim()) return toast('攤位名稱必填', 'err');
     setBusy(true);
@@ -2020,7 +1997,7 @@ function AdminPanel({ adminUser, onLogout, db, rtdb }) {
               </div>
             </div>
             {[
-              ['description', '攤位介紹'], ['plurkUrl', '噗浪連結'], ['task', '集章任務說明'],
+              ['ownerName', '攤主名稱（噗浪暱稱）'], ['description', '攤位介紹'], ['plurkUrl', '噗浪連結'], ['task', '集章任務說明'],
               ['stampImageUrl', '印章圖網址（噗浪圖床）'], ['facadeImageUrl', '封面圖網址'], ['stampHint', '印章備註（選填）'],
             ].map(([key, label]) => (
               <div key={key} style={{ marginBottom: 10 }}>
