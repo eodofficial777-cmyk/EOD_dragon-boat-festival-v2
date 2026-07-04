@@ -278,9 +278,8 @@ function AppInner() {
     return () => unsub();
   }, []);
 
-  // 載入攤位資料（Firestore）
-  useEffect(() => {
-    const loadBooths = async () => {
+  // 載入攤位資料（Firestore）——抽成可重複呼叫：進入預覽/登入時都會重新抓
+  const loadBoothsFromCloud = useCallback(async () => {
       try {
         const boothSnap = await getDocs(collection(db, 'booths'));
         if (boothSnap.empty) { setBooths([]); setBoothsLoading(false); return; }
@@ -322,8 +321,21 @@ function AppInner() {
       } finally {
         setBoothsLoading(false);
       }
-    };
-    loadBooths();
+  }, []);
+  useEffect(() => { loadBoothsFromCloud(); }, [loadBoothsFromCloud]);
+
+  // 遊戲參數（後台「設定」分頁可調）：初始購物金、集章獎勵金
+  const [gameConfig, setGameConfig] = useState({ initialCoins: 500, stampReward: 50 });
+  useEffect(() => {
+    getDoc(doc(db, 'settings', 'general')).then(s => {
+      if (s.exists()) {
+        const d = s.data();
+        setGameConfig({
+          initialCoins: Number(d.initialCoins) > 0 ? Number(d.initialCoins) : 500,
+          stampReward: Number(d.stampReward) > 0 ? Number(d.stampReward) : 50,
+        });
+      }
+    }).catch(() => {});
   }, []);
 
   // 當 booths 更新時，同步更新打開中的攤位詳情頁
@@ -392,20 +404,23 @@ function AppInner() {
     setLoading(true);
     try {
       const settingsSnap = await getDoc(doc(db, 'settings', 'general'));
+      let initCoins = gameConfig.initialCoins;
       if (settingsSnap.exists()) {
         const s = settingsSnap.data();
         if (s.registrationOpen === false) {
           return showMsg(s.registrationClosedMsg || '目前尚未開放新玩家登記', 'warn');
         }
+        if (Number(s.initialCoins) > 0) initCoins = Number(s.initialCoins);
       }
       const username = inputName.trim();
       const pin = inputPin.trim();
       const existing = await getDoc(doc(db, 'players', username));
       if (existing.exists()) return showMsg('此名稱已有人使用', 'warn');
-      const newPlayer = { pin, coins: 500, inventory: [], stamps: [], createdAt: Timestamp.now() };
+      const newPlayer = { pin, coins: initCoins, inventory: [], stamps: [], createdAt: Timestamp.now() };
       await setDoc(doc(db, 'players', username), newPlayer);
       setUserData({ username, ...newPlayer, stamps: [], inventory: [] });
       setView('home');
+      loadBoothsFromCloud();
       showMsg(`歡迎來到慶典，${username}！`, 'success');
     } catch (err) {
       showMsg('註冊失敗，請檢查網路', 'warn');
@@ -424,6 +439,7 @@ function AppInner() {
       if (data.pin !== inputPin.trim()) return showMsg('密碼不正確', 'warn');
       setUserData({ username, ...data, stamps: data.stamps || [], inventory: data.inventory || [] });
       setView('home');
+      loadBoothsFromCloud();
       showMsg(`歡迎回來，${username}！`, 'success');
     } catch (err) {
       showMsg('登入失敗，請檢查網路', 'warn');
@@ -535,7 +551,8 @@ function AppInner() {
   const collectStamp = async (boothId) => {
     if (userData.stamps.includes(boothId)) return showMsg('這個章你已經領過囉！');
 
-    const optimistic = { ...userData, coins: userData.coins + 50, stamps: [...userData.stamps, boothId] };
+    const reward = gameConfig.stampReward;
+    const optimistic = { ...userData, coins: userData.coins + reward, stamps: [...userData.stamps, boothId] };
     setUserData(optimistic);
     const booth = booths.find(b => b.id === boothId) || selectedBooth;
     if (booth) {
@@ -543,14 +560,14 @@ function AppInner() {
         boothName: booth.name,
         boothEmoji: booth.emoji,
         stamp: booth.stamp || { imageUrl: booth.stampImageUrl || '' },
-        reward: 50,
+        reward,
       });
     }
 
     if (!userData.isDemo) {
       try {
         await updateDoc(doc(db, 'players', userData.username), {
-          coins: fsIncrement(50),
+          coins: fsIncrement(reward),
           stamps: arrayUnion(boothId)
         });
         await addDoc(collection(db, 'stampLogs'), {
@@ -589,6 +606,7 @@ function AppInner() {
           const name = '管理員預覽';
           setUserData({ username: name, pin: '0000', coins: 9999, inventory: [], stamps: [], isDemo: true });
           setView('home');
+          loadBoothsFromCloud();   // 重新抓雲端攤位，避免殘留試玩假資料
         } else {
           await signOut(auth); setAdminUser(null); setUserData(null); setView('entry');
         }
@@ -1697,7 +1715,7 @@ function AdminPanel({ adminUser, onLogout, db, rtdb }) {
   const [msg, setMsg] = useState(null);
   const [boothList, setBoothList] = useState([]);
   const [playerList, setPlayerList] = useState([]);
-  const [settings, setSettings] = useState({ registrationOpen: true, registrationClosedMsg: '' });
+  const [settings, setSettings] = useState({ registrationOpen: true, registrationClosedMsg: '', initialCoins: 500, stampReward: 50 });
   const [teams, setTeams] = useState([]);
   const [editing, setEditing] = useState(null);        // 編輯中的攤位
   const [busy, setBusy] = useState(false);
@@ -1723,7 +1741,15 @@ function AdminPanel({ adminUser, onLogout, db, rtdb }) {
       const ps = await getDocs(collection(db, 'players'));
       setPlayerList(ps.docs.map(d => ({ username: d.id, ...d.data() })));
       const st = await getDoc(doc(db, 'settings', 'general'));
-      if (st.exists()) setSettings({ registrationOpen: st.data().registrationOpen !== false, registrationClosedMsg: st.data().registrationClosedMsg || '' });
+      if (st.exists()) {
+        const sd = st.data();
+        setSettings({
+          registrationOpen: sd.registrationOpen !== false,
+          registrationClosedMsg: sd.registrationClosedMsg || '',
+          initialCoins: Number(sd.initialCoins) > 0 ? Number(sd.initialCoins) : 500,
+          stampReward: Number(sd.stampReward) > 0 ? Number(sd.stampReward) : 50,
+        });
+      }
     } catch (e) { toast('資料載入失敗：' + e.message, 'err'); }
   }, [db]);
 
@@ -1791,7 +1817,7 @@ function AdminPanel({ adminUser, onLogout, db, rtdb }) {
         if (!name) continue;
         const exist = await getDoc(doc(db, 'players', name));
         if (exist.exists()) { skip++; continue; }
-        await setDoc(doc(db, 'players', name), { pin: pin || '0000', coins: 500, inventory: [], stamps: [], createdAt: Timestamp.now() });
+        await setDoc(doc(db, 'players', name), { pin: pin || '0000', coins: Number(settings.initialCoins) > 0 ? Number(settings.initialCoins) : 500, inventory: [], stamps: [], createdAt: Timestamp.now() });
         ok++;
       }
       toast(`已建立 ${ok} 位玩家${skip ? `（略過重複 ${skip} 位）` : ''}`);
@@ -1817,8 +1843,14 @@ function AdminPanel({ adminUser, onLogout, db, rtdb }) {
   // ---------- 設定 ----------
   const saveSettings = async () => {
     try {
-      await setDoc(doc(db, 'settings', 'general'), settings, { merge: true });
-      toast('設定已儲存');
+      const payload = {
+        ...settings,
+        initialCoins: Number(settings.initialCoins) > 0 ? Number(settings.initialCoins) : 500,
+        stampReward: Number(settings.stampReward) > 0 ? Number(settings.stampReward) : 50,
+      };
+      await setDoc(doc(db, 'settings', 'general'), payload, { merge: true });
+      setSettings(payload);
+      toast('設定已儲存（玩家端重新整理後生效）');
     } catch (e) { toast('儲存失敗：' + e.message, 'err'); }
   };
 
@@ -2127,6 +2159,17 @@ function AdminPanel({ adminUser, onLogout, db, rtdb }) {
             </label>
             <label style={lbl}>關閉登記時顯示的訊息</label>
             <input style={inp} value={settings.registrationClosedMsg} onChange={e => setSettings({ ...settings, registrationClosedMsg: e.target.value })} placeholder="目前尚未開放新玩家登記" />
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 14 }}>
+              <div>
+                <label style={lbl}>初始購物金（新玩家註冊/批次建立時發放）</label>
+                <input style={inp} type="number" min="1" value={settings.initialCoins} onChange={e => setSettings({ ...settings, initialCoins: e.target.value })} />
+              </div>
+              <div>
+                <label style={lbl}>集章獎勵金（每領一個章獲得）</label>
+                <input style={inp} type="number" min="1" value={settings.stampReward} onChange={e => setSettings({ ...settings, stampReward: e.target.value })} />
+              </div>
+            </div>
+            <p style={{ fontSize: 10, color: '#64748b', marginTop: 6 }}>※ 只影響之後的註冊與集章，不會回溯調整已發出的金額</p>
             <button onClick={saveSettings} style={{ ...btn('#0d9488'), marginTop: 12 }}>💾 儲存設定</button>
           </div>
         )}
