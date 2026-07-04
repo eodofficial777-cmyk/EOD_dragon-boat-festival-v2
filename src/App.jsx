@@ -45,6 +45,7 @@ const ICON_PATHS = {
   refresh: '<path d="M20 12a8 8 0 1 1-2.3-5.6"/><path d="M20.2 3.2v4.4h-4.4"/>',
   flag: '<path d="M6 3v18"/><path d="M6 4.5h11l-2.6 3.5L17 11.5H6"/>',
   heart: '<path d="M12 19.5s-6.6-4.2-8.4-8.3A4.6 4.6 0 0 1 12 7.6a4.6 4.6 0 0 1 8.4 3.6c-1.8 4.1-8.4 8.3-8.4 8.3z"/>',
+  horn: '<path d="M3 11l18-5v12L3 14v-3z"/><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6"/>',
   lock: '<rect x="5.5" y="10.5" width="13" height="9.5" rx="1"/><path d="M8.5 10.5V7.5a3.5 3.5 0 0 1 7 0v3"/>',
   user: '<circle cx="12" cy="8" r="3.8"/><path d="M4.8 20a7.5 7.5 0 0 1 14.4 0"/>',
   lantern: '<path d="M8.2 6.5h7.6c1.9 2.6 1.9 7.4 0 10H8.2c-1.9-2.6-1.9-7.4 0-10z"/><path d="M12 3.5v3M12 16.5v2.5M10 21h4"/><path d="M9.8 6.8c-.9 2.8-.9 6.6 0 9.4M14.2 6.8c.9 2.8.9 6.6 0 9.4"/>',
@@ -1002,7 +1003,7 @@ function AppInner() {
         @keyframes flipPrev { 0%{transform:perspective(1200px) rotateY(72deg);opacity:0.3} 100%{transform:perspective(1200px) rotateY(0deg);opacity:1} }
         @keyframes eventPop { 0%{transform:scale(0.6);opacity:0} 60%{transform:scale(1.08)} 100%{transform:scale(1);opacity:1} }
         @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.5} }
-        @keyframes cheerFloat { 0%{opacity:1;transform:translateY(0)} 100%{opacity:0;transform:translateY(-50px) scale(1.4)} }
+        @keyframes cheerFloat { 0%{opacity:1;transform:translateY(0) scale(0.7)} 25%{transform:translateY(-14px) scale(1.15)} 100%{opacity:0;transform:translateY(-62px) scale(1.25)} }
         @keyframes boatRock { 0%,100%{transform:rotate(-8deg) translateY(0)} 50%{transform:rotate(8deg) translateY(-4px)} }
         .riverWater { background-image: radial-gradient(circle at 10px -5px, transparent 8px, rgba(255,255,255,0.5) 8.5px, transparent 10.5px); background-size: 22px 11px; animation: waterFlow 2.8s linear infinite; pointer-events: none; }
         @keyframes waterFlow { from{background-position:0 0} to{background-position:-44px 0} }
@@ -1317,7 +1318,7 @@ function calcRacePos(team) {
 // 河道賽況追蹤器（含第5點需求：每輪事件顯示）
 // ============================================================
 function RiverRaceTracker({ teams, onFlagClick, isDemo, loading }) {
-  const [cheerAnim, setCheerAnim] = useState({});
+  const [bursts, setBursts] = useState([]);   // 打氣噴發 {id, teamId, dx, rot}（可連點刷一排）
   const [collapsed, setCollapsed] = useState(window.innerWidth < 480 && teams.length > 3);
   const [events, setEvents] = useState([]);
   const isMobile = window.innerWidth < 640;
@@ -1338,7 +1339,9 @@ function RiverRaceTracker({ teams, onFlagClick, isDemo, loading }) {
   }, [isDemo]);
 
   const doCheer = (teamId) => {
-    setCheerAnim(prev => ({ ...prev, [teamId]: Date.now() }));
+    const id = Date.now() + Math.random();
+    setBursts(prev => [...prev.slice(-19), { id, teamId, dx: Math.floor(Math.random() * 44) - 22, rot: Math.floor(Math.random() * 44) - 22 }]);
+    setTimeout(() => setBursts(prev => prev.filter(b => b.id !== id)), 1000);
     if (!isDemo) {
       runTransaction(ref(rtdb, `race/${teamId}/cheers`), (cur) => (Number(cur) || 0) + 1).catch(() => {});
     }
@@ -1377,7 +1380,7 @@ function RiverRaceTracker({ teams, onFlagClick, isDemo, loading }) {
           <span style={{ fontSize: 8, fontWeight: 700, color: '#8a9a90', letterSpacing: 2, textTransform: 'uppercase' }}>Dragon Race</span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontSize: 9, fontWeight: 700, color: '#8a9a90', display: 'flex', alignItems: 'center', gap: 3 }}><Icon name="heart" size={10} color={C.red} />幫喜歡的隊伍打氣</span>
+          <span style={{ fontSize: 9, fontWeight: 700, color: '#8a9a90', display: 'flex', alignItems: 'center', gap: 3 }}><Icon name="horn" size={10} color={C.red} />幫喜歡的隊伍打氣</span>
           {teams.length > 3 && isMobile && (
             <button onClick={() => setCollapsed(c => !c)} style={{ padding: '3px 9px', clipPath: CUT(5), border: `1px solid ${C.line}`, background: C.paper, fontSize: 9, fontWeight: 800, color: C.ink, cursor: 'pointer' }}>
               {collapsed ? `顯示全部 ${teams.length} 隊` : '只看前三'}
@@ -1407,7 +1410,16 @@ function RiverRaceTracker({ teams, onFlagClick, isDemo, loading }) {
           const total = Math.min(200, team.outboundScore) + (team.turnSuccess ? Math.min(200, team.inboundScore) : 0);
           const heading = pos.phase === 'in' || pos.phase === 'done';   // 回程/完賽 → 船頭朝左
           return (
-            <div key={team.id} style={{ position: 'relative', background: C.paper, clipPath: CUT(9), border: `1px solid ${C.line}`, padding: '7px 12px 9px' }}>
+            <div key={team.id} style={{ position: 'relative' }}>
+              {/* 打氣噴發：放在切角卡片外層，往上飄不會被裁掉 */}
+              {bursts.filter(b => b.teamId === team.id).map(b => (
+                <span key={b.id} style={{ position: 'absolute', top: 4, right: 18 + b.dx / 2, zIndex: 30, animation: 'cheerFloat 0.95s ease-out forwards', pointerEvents: 'none' }}>
+                  <span style={{ display: 'inline-block', transform: `rotate(${b.rot}deg)` }}>
+                    <Icon name="horn" size={15} color={C.red} sw={2} />
+                  </span>
+                </span>
+              ))}
+              <div style={{ position: 'relative', background: C.paper, clipPath: CUT(9), border: `1px solid ${C.line}`, padding: '7px 12px 9px' }}>
               {/* 隊伍列 */}
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 5 }}>
                 <span style={{ width: 17, height: 17, clipPath: CUT(4), display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 9, fontWeight: 900, fontFamily: 'monospace', background: idx < 3 ? RANK_COLOR[idx] : '#d5d0bf', color: '#fff', flexShrink: 0 }}>{idx + 1}</span>
@@ -1440,14 +1452,9 @@ function RiverRaceTracker({ teams, onFlagClick, isDemo, loading }) {
                 <span style={{ fontSize: 9, fontWeight: 800, color: pos.phase === 'done' ? C.gold : pos.phase === 'turn' ? C.red : C.teal, flexShrink: 0, letterSpacing: 1 }}>{pos.label}</span>
 
                 {/* 打氣 */}
-                <button onClick={() => doCheer(team.id)} style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 3, padding: '3px 8px', clipPath: CUT(5), border: '1px solid rgba(194,65,12,0.3)', background: 'rgba(194,65,12,0.05)', cursor: 'pointer', flexShrink: 0 }}>
-                  <Icon name="heart" size={11} color={C.red} />
+                <button onClick={() => doCheer(team.id)} style={{ display: 'flex', alignItems: 'center', gap: 3, padding: '3px 8px', clipPath: CUT(5), border: '1px solid rgba(194,65,12,0.3)', background: 'rgba(194,65,12,0.05)', cursor: 'pointer', flexShrink: 0 }}>
+                  <Icon name="horn" size={11} color={C.red} />
                   <span style={{ fontSize: 9, fontWeight: 900, color: C.red, fontFamily: 'monospace' }}>{team.cheers}</span>
-                  {cheerAnim[team.id] && (
-                    <span key={cheerAnim[team.id]} style={{ position: 'absolute', top: -4, right: 4, animation: 'cheerFloat 0.9s ease-out forwards', pointerEvents: 'none' }}>
-                      <Icon name="heart" size={12} color={C.red} />
-                    </span>
-                  )}
                 </button>
               </div>
 
@@ -1482,6 +1489,7 @@ function RiverRaceTracker({ teams, onFlagClick, isDemo, loading }) {
               <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 3 }}>
                 <span style={{ fontSize: 8, fontWeight: 700, color: '#8a9a90', fontFamily: 'monospace' }}>去程 {Math.min(200, team.outboundScore)}/200{team.turnSuccess ? ` ・ 回程 ${Math.min(200, team.inboundScore)}/200` : ''}</span>
                 <span style={{ fontSize: 8, fontWeight: 900, color: C.ink, fontFamily: 'monospace' }}>TOTAL {total}</span>
+              </div>
               </div>
             </div>
           );
