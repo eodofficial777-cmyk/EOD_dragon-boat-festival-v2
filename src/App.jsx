@@ -1111,19 +1111,19 @@ function PhysicsBag({ inventory, booths }) {
           clipPath: 'polygon(3% 0, 97% 0, 100% 100%, 0 100%)',
           border: '1px solid rgba(30,58,138,0.3)',
           background: `repeating-linear-gradient(180deg,
-            #d95555 0px 30px,  #f5f2e8 30px 33px,
-            #3b78d8 33px 63px, #f5f2e8 63px 66px,
-            #45a049 66px 96px, #f5f2e8 96px 99px)`,
+            #eeb3ae 0px 30px,  #faf7ee 30px 33px,
+            #adc9ee 33px 63px, #faf7ee 63px 66px,
+            #b2d8ac 66px 96px, #faf7ee 96px 99px)`,
         }}>
           {/* 網布紋理 */}
-          <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', opacity: 0.55, backgroundImage: 'linear-gradient(rgba(255,255,255,0.3) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.3) 1px, transparent 1px)', backgroundSize: '3px 3px' }} />
+          <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', opacity: 0.5, backgroundImage: 'linear-gradient(rgba(255,255,255,0.45) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.45) 1px, transparent 1px)', backgroundSize: '3px 3px' }} />
           {/* 直向織帶（對齊提把兩端） */}
           <div style={{ position: 'absolute', top: 0, bottom: 0, left: 'calc(24% - 10px)', width: 20, background: NAVY, zIndex: 1, boxShadow: 'inset 2px 0 0 rgba(255,255,255,0.15), inset -2px 0 0 rgba(0,0,0,0.2)' }} />
           <div style={{ position: 'absolute', top: 0, bottom: 0, right: 'calc(24% - 10px)', width: 20, background: NAVY, zIndex: 1, boxShadow: 'inset 2px 0 0 rgba(255,255,255,0.15), inset -2px 0 0 rgba(0,0,0,0.2)' }} />
           {/* 紅色袋口滾邊 */}
-          <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 12, background: '#d0453c', borderBottom: '2px solid #f5f2e8', zIndex: 2 }} />
+          <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 12, background: '#e2887f', borderBottom: '2px solid #faf7ee', zIndex: 2 }} />
           {/* 側邊小布標 */}
-          <div style={{ position: 'absolute', right: 8, top: 76, zIndex: 2, background: '#d0453c', color: '#fff', fontSize: 7, fontWeight: 900, letterSpacing: 2, padding: '5px 3px', writingMode: 'vertical-rl', border: '1px solid rgba(255,255,255,0.5)' }}>盛夏慶典</div>
+          <div style={{ position: 'absolute', right: 8, top: 76, zIndex: 2, background: '#dd8177', color: '#fff', fontSize: 7, fontWeight: 900, letterSpacing: 2, padding: '5px 3px', writingMode: 'vertical-rl', border: '1px solid rgba(255,255,255,0.5)' }}>盛夏慶典</div>
 
           {/* 商品擺放區 */}
           <div ref={areaRef} style={{ position: 'absolute', inset: '14px 0 0 0', touchAction: 'none', zIndex: 3 }}>
@@ -1507,9 +1507,9 @@ function RiverRaceTracker({ teams, onFlagClick, isDemo, loading }) {
 // ============================================================
 function MiniSquareCard({ booth, stamped, onOpen }) {
   return (
-    <button onClick={() => onOpen(booth)} style={{ position: 'relative', width: 106, flexShrink: 0, background: 'transparent', border: 'none', cursor: 'pointer', padding: 0 }}>
+    <button onClick={() => onOpen(booth)} style={{ position: 'relative', width: 98, flexShrink: 0, background: 'transparent', border: 'none', cursor: 'pointer', padding: 0 }}>
       {/* 帳篷頂棚（白色遮陽棚 + 波浪垂邊 + 頂端三角旗） */}
-      <svg viewBox="0 0 106 34" width="106" height="34" style={{ display: 'block', overflow: 'visible', filter: 'drop-shadow(0 2px 2px rgba(18,63,48,0.14))' }}>
+      <svg viewBox="0 0 106 34" width="98" height="31" style={{ display: 'block', overflow: 'visible', filter: 'drop-shadow(0 2px 2px rgba(18,63,48,0.14))' }}>
         <path d="M53 10 V3 l8 2.4 -8 2.4" fill={C.teal} stroke="none" />
         <path d="M7 29 L17 12 Q53 4 89 12 L99 29
                  a5.75 5 0 0 1 -11.5 0 a5.75 5 0 0 1 -11.5 0 a5.75 5 0 0 1 -11.5 0 a5.75 5 0 0 1 -11.5 0
@@ -1517,8 +1517,8 @@ function MiniSquareCard({ booth, stamped, onOpen }) {
           fill="#ffffff" stroke="rgba(18,63,48,0.3)" strokeWidth="1.2" />
         <path d="M31 9 L27 29 M53 7 V29 M75 9 L79 29" stroke="rgba(18,63,48,0.1)" strokeWidth="1" fill="none" />
       </svg>
-      {/* 攤位本體（白帳篷 + 兩側支柱） */}
-      <div style={{ height: 56, margin: '0 6px', background: '#fff', borderLeft: '3px solid #ddd6c2', borderRight: '3px solid #ddd6c2', borderBottom: `1px solid ${C.line}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 28, overflow: 'hidden', position: 'relative' }}>
+      {/* 攤位本體（正方形縮圖格：玩家提供 300×300 會完整貼合） */}
+      <div style={{ width: 86, height: 86, margin: '0 auto', background: '#fff', borderLeft: '3px solid #ddd6c2', borderRight: '3px solid #ddd6c2', borderBottom: `1px solid ${C.line}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 30, overflow: 'hidden', position: 'relative', boxSizing: 'border-box' }}>
         {booth.facadeImageUrl
           ? <img src={booth.facadeImageUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={e => { e.target.style.display = 'none'; e.target.parentElement.textContent = booth.emoji || '🏮'; }} />
           : (booth.emoji || <Icon name="lantern" size={26} color={C.teal} />)}
