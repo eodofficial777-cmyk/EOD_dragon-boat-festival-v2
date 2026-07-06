@@ -57,6 +57,7 @@ const ICON_PATHS = {
   close: '<path d="M6 6l12 12M18 6 6 18"/>',
   logout: '<path d="M9.5 5H5v14h4.5"/><path d="M13.5 8l4 4-4 4M17.5 12H9"/>',
   gift: '<rect x="4" y="9" width="16" height="11" rx="1"/><path d="M12 9v11M4 13h16"/><path d="M12 9c-1-2.8-3-4.2-4.6-3.4S6.6 9 9 9zM12 9c1-2.8 3-4.2 4.6-3.4S17.4 9 15 9z"/>',
+  ticket: '<path d="M3.5 9V7.5a1 1 0 0 1 1-1h15a1 1 0 0 1 1 1V9a3 3 0 0 0 0 6v1.5a1 1 0 0 1-1 1h-15a1 1 0 0 1-1-1V15a3 3 0 0 0 0-6z"/><path d="M14.5 6.5v11" stroke-dasharray="2.5 2.5"/>',
 };
 function Icon({ name, size = 16, color = 'currentColor', sw = 1.7, style }) {
   return (
@@ -207,6 +208,11 @@ const MOCK_RACE_TEAMS = [
   { id: 3, name: '粽子吃到飽隊', color: '#15803d', flagImageUrl: '', outboundScore: 200, inboundScore: 60, turnSuccess: true, cheers: 342, lastRolls: [1, 3, 2, 5, 4], lastEvent: { name: '大順風', delta: 5, icon: 'wind' } },
   { id: 4, name: '極速龍舟傳說', color: '#7c3aed', flagImageUrl: 'https://images.plurk.com/2HjjzKJMBWLsFSHYdLaNAv.png', outboundScore: 200, inboundScore: 200, turnSuccess: true, cheers: 999, lastRolls: [], lastEvent: null },
 ];
+const MOCK_BETS = [
+  { username: '慶典達人', bets: { 3: 120, 2: 30 } },
+  { username: '龍舟粉絲', bets: { 2: 80 } },
+  { username: '愛吃粽子', bets: { 1: 50 } },
+];
 const MOCK_RACE_EVENTS = [
   { t: 3, team: '粽子吃到飽隊', name: '大順風', delta: 5, icon: 'wind' },
   { t: 2, team: '南港輪胎隊', name: '災厄鮭襲擊', delta: -5, icon: 'fish' },
@@ -259,6 +265,8 @@ function AppInner() {
   const [adminUser, setAdminUser] = useState(null);
   const [boothsLoading, setBoothsLoading] = useState(true);
   const [raceLoading, setRaceLoading] = useState(true);
+
+  const isMobileApp = window.innerWidth < 640;   // 手機版改整頁捲動，桌面維持固定版面
 
   const showMsg = (text, type = 'info') => {
     setMessage({ text, type });
@@ -337,6 +345,43 @@ function AppInner() {
       }
     }).catch(() => {});
   }, []);
+
+  // ===== 龍舟賭盤（彩池制）=====
+  const [bettingMeta, setBettingMeta] = useState({ open: false, settled: false });  // RTDB: betting
+  const [allBets, setAllBets] = useState([]);                                        // Firestore: raceBets 即時同步
+  useEffect(() => {
+    const unsub = onValue(ref(rtdb, 'betting'), (s) => setBettingMeta(s.val() || { open: false, settled: false }));
+    return () => unsub();
+  }, []);
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, 'raceBets'), (snap) => {
+      setAllBets(snap.docs.map(d => ({ username: d.id, ...d.data() })));
+    }, () => {});
+    return () => unsub();
+  }, []);
+  const myBet = userData ? allBets.find(b => b.username === userData.username) : null;
+
+  // 下注／加注（自由投注：可押多隊、可重複加碼，封盤前皆可）
+  const placeBet = async (team, rawAmount) => {
+    const amount = Math.floor(Number(rawAmount));
+    if (!amount || amount <= 0) return showMsg('請輸入有效的下注金額', 'warn');
+    if (userData.isDemo) return showMsg('試玩／預覽模式無法下注，請用正式玩家帳號參與', 'warn');
+    if (!bettingMeta.open || bettingMeta.settled) return showMsg('賭盤目前未開放下注', 'warn');
+    if (userData.coins < amount) return showMsg('購物金不足', 'warn');
+    setUserData(prev => ({ ...prev, coins: prev.coins - amount }));
+    try {
+      await setDoc(doc(db, 'raceBets', userData.username), {
+        bets: { [String(team.id)]: fsIncrement(amount) },
+        names: { [String(team.id)]: team.name },
+        paid: false, updatedAt: Timestamp.now(),
+      }, { merge: true });
+      await updateDoc(doc(db, 'players', userData.username), { coins: fsIncrement(-amount) });
+      showMsg(`下注成功！$${amount} 押「${team.name}」，封盤前都能繼續加碼`, 'success');
+    } catch (e) {
+      setUserData(prev => ({ ...prev, coins: prev.coins + amount }));
+      showMsg('下注失敗，請再試一次', 'warn');
+    }
+  };
 
   // 當 booths 更新時，同步更新打開中的攤位詳情頁
   useEffect(() => {
@@ -616,6 +661,13 @@ function AppInner() {
     />
   );
 
+  // 賭盤顯示資料（純試玩用示範資料，其餘皆真實）
+  const usingMockRace = !!(userData && userData.isDemo && raceTeams.length === 0);
+  const betTeams = usingMockRace ? MOCK_RACE_TEAMS : raceTeams;
+  const betList = usingMockRace ? MOCK_BETS : allBets;
+  const betMetaShow = usingMockRace ? { open: true, settled: false } : bettingMeta;
+  const showBetting = usingMockRace || raceTeams.length > 0;
+
   // --- 入口畫面 ---
   if (view === 'entry' || !userData) return (
     <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, overflow: 'hidden', position: 'relative', background: 'linear-gradient(160deg, #0f2922 0%, #134e3a 55%, #10303c 100%)' }}>
@@ -792,7 +844,7 @@ function AppInner() {
       <main style={{ height: 'calc(100vh - 152px)', position: 'relative' }}>
         {/* HOME */}
         {view === 'home' && (
-          <div style={{ height: '100%', display: 'flex', flexDirection: 'column', position: 'relative', overflow: 'hidden' }}>
+          <div style={{ height: '100%', display: 'flex', flexDirection: 'column', position: 'relative', overflow: isMobileApp ? 'auto' : 'hidden', WebkitOverflowScrolling: 'touch' }}>
             <div style={{ position: 'absolute', inset: 0, opacity: 0.05, backgroundImage: `linear-gradient(${C.tealDim} 1px, transparent 1px), linear-gradient(90deg, ${C.tealDim} 1px, transparent 1px)`, backgroundSize: '40px 40px', pointerEvents: 'none', zIndex: 0 }} />
 
             {boothsLoading ? (
@@ -812,16 +864,22 @@ function AppInner() {
             )}
 
             {/* 河道賽況 */}
-            <div style={{ flex: 1, minHeight: 0, zIndex: 5, position: 'relative', display: 'flex', flexDirection: 'column' }}>
+            <div style={{ flex: isMobileApp ? '0 0 auto' : 1, minHeight: 0, zIndex: 5, position: 'relative', display: 'flex', flexDirection: 'column' }}>
               <TechDivider />
-              <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
+              <div style={{ flex: isMobileApp ? '0 0 auto' : 1, minHeight: 0, overflow: isMobileApp ? 'visible' : 'hidden' }}>
                 <RiverRaceTracker teams={userData.isDemo && raceTeams.length === 0 ? MOCK_RACE_TEAMS : raceTeams} onFlagClick={setZoomFlagUrl} isDemo={userData.isDemo} mockData={userData.isDemo && raceTeams.length === 0} loading={raceLoading && !userData.isDemo} />
               </div>
               <TechDivider flip />
             </div>
 
-            {!boothsLoading && booths.length > 0 && (
-              <BoothPillRow booths={booths.filter(b => b.side === 'bottom')} stamps={userData.stamps} onOpen={openBooth} side="bottom" />
+            {/* 賠率跑馬燈（點了進賭盤） */}
+            {showBetting && (betMetaShow.open || betMetaShow.settled || betList.length > 0) && (
+              <OddsMarquee teams={betTeams} bets={betList} meta={betMetaShow} onOpen={() => setView('betting')} />
+            )}
+
+            {!boothsLoading && (
+              <BoothPillRow booths={booths.filter(b => b.side === 'bottom')} stamps={userData.stamps} onOpen={openBooth} side="bottom"
+                extra={showBetting ? <BettingTentCard open={betMetaShow.open && !betMetaShow.settled} onOpen={() => setView('betting')} /> : null} />
             )}
           </div>
         )}
@@ -936,6 +994,12 @@ function AppInner() {
           </div>
         )}
 
+        {/* BETTING：龍舟賭盤 */}
+        {view === 'betting' && (
+          <BettingBooth teams={betTeams} bets={betList} meta={betMetaShow} myBet={myBet}
+            coins={userData.coins} isDemo={userData.isDemo} onBet={placeBet} onBack={() => setView('home')} />
+        )}
+
         {/* INVENTORY：物理購物袋 */}
         {view === 'inventory' && (
           <PhysicsBag inventory={userData.inventory} booths={booths} />
@@ -1025,6 +1089,7 @@ function AppInner() {
         @keyframes boatRock { 0%,100%{transform:rotate(-8deg) translateY(0)} 50%{transform:rotate(8deg) translateY(-4px)} }
         .riverWater { background-image: radial-gradient(circle at 10px -5px, transparent 8px, rgba(255,255,255,0.5) 8.5px, transparent 10.5px); background-size: 22px 11px; animation: waterFlow 2.8s linear infinite; pointer-events: none; }
         @keyframes waterFlow { from{background-position:0 0} to{background-position:-44px 0} }
+        @keyframes marqueeScroll { from{transform:translateX(0)} to{transform:translateX(-50%)} }
         @keyframes bagDrop { 0%{transform:translateY(-440px) rotate(-6deg);opacity:0} 10%{opacity:1} 80%{transform:translateY(7px) rotate(1deg)} 100%{transform:translateY(0) rotate(0)} }
       `}</style>
     </div>
@@ -1377,14 +1442,14 @@ function RiverRaceTracker({ teams, onFlagClick, isDemo, mockData, loading }) {
   const shown = collapsed ? sorted.slice(0, 3) : sorted;
 
   if (loading) return (
-    <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 8 }}>
+    <div style={{ height: isMobile ? 'auto' : '100%', minHeight: 110, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 8 }}>
       <Icon name="boat" size={30} color={C.tealDim} style={{ animation: 'boatRock 1.4s ease-in-out infinite' }} />
       <p style={{ fontSize: 11, fontWeight: 700, color: '#94a3b8' }}>賽況連線中...</p>
     </div>
   );
 
   if (teams.length === 0) return (
-    <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 8, padding: 16, textAlign: 'center' }}>
+    <div style={{ height: isMobile ? 'auto' : '100%', minHeight: 110, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 8, padding: 16, textAlign: 'center' }}>
       <Icon name="flag" size={30} color={C.tealDim} />
       <p style={{ fontSize: 12, fontWeight: 800, color: C.teal }}>龍舟賽尚未開始</p>
       <p style={{ fontSize: 10, color: '#94a3b8' }}>比賽開始後，這裡會即時顯示各隊賽況</p>
@@ -1392,7 +1457,7 @@ function RiverRaceTracker({ teams, onFlagClick, isDemo, mockData, loading }) {
   );
 
   return (
-    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', padding: '6px 0 4px' }}>
+    <div style={{ height: isMobile ? 'auto' : '100%', display: 'flex', flexDirection: 'column', padding: '6px 0 4px' }}>
       {/* 標題列 */}
       <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 14px 4px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -1425,7 +1490,7 @@ function RiverRaceTracker({ teams, onFlagClick, isDemo, mockData, loading }) {
       )}
 
       {/* 賽道 */}
-      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '2px 14px 6px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <div style={{ flex: 1, minHeight: 0, overflowY: isMobile ? 'visible' : 'auto', padding: '2px 14px 6px', display: 'flex', flexDirection: 'column', gap: 6 }}>
         {shown.map((team, idx) => {
           const pos = calcRacePos(team);
           const total = Math.min(200, team.outboundScore) + (team.turnSuccess ? Math.min(200, team.inboundScore) : 0);
@@ -1561,13 +1626,14 @@ function MiniSquareCard({ booth, stamped, onOpen }) {
   );
 }
 
-function BoothPillRow({ booths, stamps, onOpen, side }) {
-  if (booths.length === 0) return null;
+function BoothPillRow({ booths, stamps, onOpen, side, extra }) {
+  if (booths.length === 0 && !extra) return null;
   return (
     <div style={{ flexShrink: 0, padding: side === 'top' ? '10px 12px 6px' : '6px 12px 10px', display: 'flex', overflowX: 'auto', zIndex: 6, position: 'relative' }}>
       {/* 內層 margin auto：塞得下就置中，塞不下就左右捲動 */}
       <div style={{ display: 'flex', gap: 10, margin: '0 auto', padding: '0 4px' }}>
         {booths.map(b => <MiniSquareCard key={b.id} booth={b} stamped={stamps.includes(b.id)} onOpen={onOpen} />)}
+        {extra || null}
       </div>
     </div>
   );
@@ -1591,6 +1657,246 @@ function CollectorsList({ collectors, currentUser, isStamped }) {
             <span style={{ fontSize: 10, fontWeight: 700, color: name === currentUser ? C.teal : '#57534e' }}>{name}{name === currentUser ? '（你）' : ''}</span>
           </span>
         ))}
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// 龍舟賭盤（彩池制）
+// 規則：所有賭金進同一個彩池，押中冠軍者依下注比例瓜分全池
+// 一人一注（首次選隊後鎖定），封盤前可加注同一隊；派彩無條件捨去
+// ============================================================
+// 取出一張注單的 {隊伍id: 金額} 對照（相容舊的一人一注格式）
+function betDocMap(b) {
+  if (b && b.bets && typeof b.bets === 'object') return b.bets;
+  if (b && b.teamId != null) return { [String(b.teamId)]: Number(b.amount) || 0 };
+  return {};
+}
+function betPool(bets) {
+  const totals = {};
+  let pool = 0;
+  bets.forEach(b => {
+    Object.entries(betDocMap(b)).forEach(([tid, a]) => {
+      const v = Number(a) || 0;
+      pool += v;
+      totals[String(tid)] = (totals[String(tid)] || 0) + v;
+    });
+  });
+  return { pool, totals };
+}
+const oddsText = (pool, teamTotal) => teamTotal > 0 ? (pool / teamTotal).toFixed(1) + 'x' : '無人押注';
+
+// 右下角的賭盤帳篷（深綠金色特別款）
+function BettingTentCard({ open, onOpen }) {
+  return (
+    <button onClick={onOpen} style={{ position: 'relative', width: 98, flexShrink: 0, background: 'transparent', border: 'none', cursor: 'pointer', padding: 0 }}>
+      <svg viewBox="0 0 106 34" width="98" height="31" style={{ display: 'block', overflow: 'visible', filter: 'drop-shadow(0 2px 2px rgba(18,63,48,0.2))' }}>
+        <path d="M53 10 V3 l8 2.4 -8 2.4" fill="#b7791f" stroke="none" />
+        <path d="M7 29 L17 12 Q53 4 89 12 L99 29
+                 a5.75 5 0 0 1 -11.5 0 a5.75 5 0 0 1 -11.5 0 a5.75 5 0 0 1 -11.5 0 a5.75 5 0 0 1 -11.5 0
+                 a5.75 5 0 0 1 -11.5 0 a5.75 5 0 0 1 -11.5 0 a5.75 5 0 0 1 -11.5 0 a5.75 5 0 0 1 -11.5 0 Z"
+          fill="#123f30" stroke="rgba(183,121,31,0.6)" strokeWidth="1.2" />
+        <path d="M31 9 L27 29 M53 7 V29 M75 9 L79 29" stroke="rgba(251,191,36,0.2)" strokeWidth="1" fill="none" />
+      </svg>
+      <div style={{ width: 86, height: 86, margin: '0 auto', background: 'linear-gradient(160deg, #16473a, #0f2922)', borderLeft: '3px solid #b7791f', borderRight: '3px solid #b7791f', borderBottom: '1px solid rgba(183,121,31,0.5)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4, position: 'relative', boxSizing: 'border-box' }}>
+        <Icon name="ticket" size={34} color="#fbbf24" sw={1.6} />
+        <span style={{ fontSize: 8, fontWeight: 800, color: 'rgba(251,191,36,0.8)', letterSpacing: 2 }}>{open ? '開盤中' : '賭盤'}</span>
+        {open && <span style={{ position: 'absolute', top: 6, right: 6, width: 7, height: 7, borderRadius: '50%', background: '#dc2626', animation: 'pulse 1.2s infinite' }} />}
+      </div>
+      <div style={{ position: 'relative', margin: '0 14px', paddingTop: 6 }}>
+        <span style={{ position: 'absolute', top: 0, left: '20%', width: 1.5, height: 6, background: 'rgba(18,63,48,0.4)' }} />
+        <span style={{ position: 'absolute', top: 0, right: '20%', width: 1.5, height: 6, background: 'rgba(18,63,48,0.4)' }} />
+        <div style={{ position: 'relative', background: C.goldBg, border: '1px solid rgba(183,121,31,0.45)', clipPath: CUT(6), padding: '4px 5px 5px' }}>
+          <p style={{ fontSize: 10, fontWeight: 900, color: '#8a5a12', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>龍舟賭盤</p>
+        </div>
+      </div>
+    </button>
+  );
+}
+
+// 河道下方的賠率跑馬燈
+function OddsMarquee({ teams, bets, meta, onOpen }) {
+  const { pool, totals } = betPool(bets);
+  const chunk = (dup) => (
+    <div key={dup} style={{ display: 'flex', gap: 8, paddingRight: 8, alignItems: 'center' }}>
+      <span style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '3px 10px', clipPath: CUT(5), background: meta.settled ? C.goldBg : meta.open ? '#123f30' : '#e8e3d4', border: '1px solid rgba(183,121,31,0.4)', flexShrink: 0 }}>
+        <Icon name="ticket" size={11} color={meta.settled ? '#8a5a12' : meta.open ? '#fbbf24' : '#8a9a90'} />
+        <span style={{ fontSize: 9, fontWeight: 900, letterSpacing: 1, whiteSpace: 'nowrap', color: meta.settled ? '#8a5a12' : meta.open ? '#fbbf24' : '#8a9a90' }}>
+          {meta.settled ? `已開獎・冠軍「${meta.winnerName || ''}」` : meta.open ? '龍舟賭盤開放中' : '賭盤已封盤'}
+        </span>
+      </span>
+      <span style={{ fontSize: 9, fontWeight: 800, color: '#8a5a12', whiteSpace: 'nowrap', fontFamily: 'monospace', flexShrink: 0 }}>總彩池 ${pool}</span>
+      {teams.map(t => (
+        <span key={dup + '_' + t.id} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '3px 9px', clipPath: CUT(5), background: C.paper, border: `1px solid ${C.line}`, flexShrink: 0 }}>
+          <span style={{ width: 8, height: 8, background: t.color || C.teal, flexShrink: 0 }} />
+          <span style={{ fontSize: 9, fontWeight: 800, color: C.ink, whiteSpace: 'nowrap' }}>{t.name}</span>
+          <span style={{ fontSize: 9, fontWeight: 700, color: '#8a9a90', whiteSpace: 'nowrap', fontFamily: 'monospace' }}>${totals[String(t.id)] || 0}</span>
+          <span style={{ fontSize: 9, fontWeight: 900, whiteSpace: 'nowrap', fontFamily: 'monospace', color: totals[String(t.id)] ? C.teal : '#b3ae9d' }}>{oddsText(pool, totals[String(t.id)] || 0)}</span>
+        </span>
+      ))}
+      <span style={{ fontSize: 9, fontWeight: 700, color: '#b3ae9d', whiteSpace: 'nowrap', flexShrink: 0 }}>點我進入賭盤 →</span>
+    </div>
+  );
+  return (
+    <div onClick={onOpen} style={{ flexShrink: 0, overflow: 'hidden', cursor: 'pointer', padding: '5px 0 3px', zIndex: 6, position: 'relative' }}>
+      <div style={{ display: 'flex', width: 'max-content', animation: 'marqueeScroll 20s linear infinite' }}>
+        {[0, 1].map(chunk)}
+      </div>
+    </div>
+  );
+}
+
+// 賭盤攤位頁面
+function BettingBooth({ teams, bets, meta, myBet, coins, isDemo, onBet, onBack }) {
+  const [pickId, setPickId] = useState(null);
+  const [amt, setAmt] = useState('');
+  const { pool, totals } = betPool(bets);
+  const canBet = meta.open && !meta.settled;
+  const myMap = betDocMap(myBet);
+  const myTotal = Object.values(myMap).reduce((s, a) => s + (Number(a) || 0), 0);
+  const teamName = (tid) => {
+    const t = teams.find(x => String(x.id) === String(tid));
+    return t ? t.name : ((myBet && myBet.names && myBet.names[tid]) || '未知隊伍');
+  };
+  const effTeam = teams.find(t => String(t.id) === String(pickId));
+  const sorted = [...teams].sort((a, b) => (totals[String(b.id)] || 0) - (totals[String(a.id)] || 0));
+
+  const submit = () => {
+    if (!effTeam) return;
+    onBet(effTeam, amt);
+    setAmt('');
+  };
+
+  return (
+    <div style={{ height: '100%', overflowY: 'auto', background: C.paper, animation: 'slideUp 0.45s cubic-bezier(0.16,1,0.3,1)' }}>
+      {/* Hero */}
+      <div style={{ position: 'relative', height: 150, background: 'linear-gradient(135deg, #123f30, #0f2922)', display: 'flex', alignItems: 'flex-end', padding: '24px 28px', overflow: 'hidden' }}>
+        <div style={{ position: 'absolute', inset: 0, opacity: 0.08, backgroundImage: 'linear-gradient(rgba(251,191,36,0.6) 1px, transparent 1px), linear-gradient(90deg, rgba(251,191,36,0.6) 1px, transparent 1px)', backgroundSize: '36px 36px' }} />
+        <button onClick={onBack} style={{ position: 'absolute', top: 20, left: 20, width: 44, height: 44, clipPath: CUT(10), background: 'rgba(255,255,255,0.14)', backdropFilter: 'blur(10px)', border: '1px solid rgba(255,255,255,0.25)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 3 }}>
+          <Icon name="chevL" size={20} color="#fff" />
+        </button>
+        <div style={{ position: 'absolute', top: 20, right: 24, zIndex: 3 }}><HexTag bg="rgba(251,191,36,0.15)" color="#fbbf24">賭</HexTag></div>
+        <div style={{ position: 'relative', zIndex: 2 }}>
+          <p style={{ fontSize: 10, fontWeight: 700, color: 'rgba(251,191,36,0.6)', letterSpacing: 3, textTransform: 'uppercase', marginBottom: 4 }}>Dragon Race Betting</p>
+          <h2 style={{ fontSize: 26, fontWeight: 900, color: '#fff', fontFamily: '"Noto Serif TC", serif', letterSpacing: 2, display: 'flex', alignItems: 'center', gap: 10 }}>
+            龍舟賭盤
+            <span style={{ fontSize: 10, fontWeight: 800, padding: '3px 10px', clipPath: CUT(5), letterSpacing: 1, background: meta.settled ? C.goldBg : meta.open ? 'rgba(220,38,38,0.9)' : 'rgba(255,255,255,0.15)', color: meta.settled ? '#8a5a12' : '#fff' }}>
+              {meta.settled ? '已開獎' : meta.open ? '開盤中 LIVE' : '已封盤'}
+            </span>
+          </h2>
+        </div>
+      </div>
+
+      <div style={{ maxWidth: 600, margin: '0 auto', padding: '22px 24px 40px' }}>
+        {/* ★ 警語 */}
+        <div style={{ position: 'relative', padding: '12px 16px', marginBottom: 18, clipPath: CUT(8), background: 'repeating-linear-gradient(45deg, rgba(194,65,12,0.08) 0 12px, rgba(183,121,31,0.1) 12px 24px)', border: '1.5px solid rgba(194,65,12,0.45)', display: 'flex', alignItems: 'center', gap: 10 }}>
+          <Icon name="horn" size={18} color={C.red} />
+          <p style={{ fontSize: 12.5, fontWeight: 900, color: '#9a3412', letterSpacing: 1.5, fontFamily: '"Noto Serif TC", serif' }}>小賭怡情，大賭翔平，強賭灰飛煙滅</p>
+        </div>
+
+        {/* 彩池 */}
+        <div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 18px', background: 'rgba(13,148,136,0.06)', clipPath: CUT(10), border: `1px solid ${C.tealDim}`, marginBottom: 16 }}>
+          <Corners size={8} inset={4} />
+          <div>
+            <p style={{ fontSize: 9, fontWeight: 800, color: C.teal, letterSpacing: 2 }}>／ 目前總彩池（彩池制）</p>
+            <p style={{ fontSize: 26, fontWeight: 900, fontFamily: 'monospace', color: C.ink, lineHeight: 1.2 }}>${pool}</p>
+          </div>
+          <div style={{ textAlign: 'right' }}>
+            <p style={{ fontSize: 10, fontWeight: 700, color: '#8a9a90' }}>共 {bets.length} 位玩家下注</p>
+            <p style={{ fontSize: 9, color: '#b3ae9d', marginTop: 2 }}>押中冠軍者按比例瓜分全池</p>
+          </div>
+        </div>
+
+        {/* 開獎結果 */}
+        {meta.settled && (
+          <div style={{ position: 'relative', textAlign: 'center', padding: 18, marginBottom: 16, background: C.goldBg, clipPath: CUT(12), border: '1.5px solid rgba(183,121,31,0.45)', animation: 'eggPop 0.5s cubic-bezier(0.16,1,0.3,1)' }}>
+            <Icon name="trophy" size={28} color="#8a5a12" style={{ margin: '0 auto 4px' }} />
+            <p style={{ fontSize: 16, fontWeight: 900, color: '#8a5a12', fontFamily: '"Noto Serif TC", serif' }}>冠軍：{meta.winnerName || '—'}</p>
+            {myBet && myBet.result === 'win' && <p style={{ fontSize: 13, fontWeight: 900, color: '#0f766e', marginTop: 6 }}>恭喜押中冠軍！派彩 ${Number(myBet.payout) || 0} 已入帳</p>}
+            {myBet && myBet.result === 'lose' && <p style={{ fontSize: 12, fontWeight: 800, color: '#9a3412', marginTop: 6 }}>灰飛煙滅…下次手氣會更好</p>}
+            {myBet && myBet.result === 'refund' && <p style={{ fontSize: 12, fontWeight: 800, color: '#57534e', marginTop: 6 }}>本輪無人押中冠軍，賭金 ${Number(myBet.payout) || 0} 已全額退還</p>}
+          </div>
+        )}
+
+        {/* 我的注單（可押多隊） */}
+        {myBet && myTotal > 0 && !meta.settled && (
+          <div style={{ padding: '12px 16px', background: C.paper, clipPath: CUT(10), border: `1.5px solid ${C.tealDim}`, marginBottom: 16 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+              <Icon name="ticket" size={17} color={C.teal} />
+              <p style={{ fontSize: 12, fontWeight: 900, flex: 1 }}>我的注單</p>
+              <p style={{ fontSize: 11, fontWeight: 900, fontFamily: 'monospace', color: C.teal }}>共 ${myTotal}</p>
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              {Object.entries(myMap).filter(([, a]) => Number(a) > 0).map(([tid, a]) => (
+                <span key={tid} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '4px 10px', clipPath: CUT(5), background: 'rgba(13,148,136,0.07)', border: `1px solid ${C.tealDim}` }}>
+                  <span style={{ fontSize: 10, fontWeight: 800, color: C.ink }}>{teamName(tid)}</span>
+                  <span style={{ fontSize: 10, fontWeight: 900, fontFamily: 'monospace', color: '#8a5a12' }}>${Number(a)}</span>
+                  <span style={{ fontSize: 9, fontWeight: 800, fontFamily: 'monospace', color: C.teal }}>{oddsText(pool, totals[String(tid)] || 0)}</span>
+                </span>
+              ))}
+            </div>
+            {canBet && <p style={{ fontSize: 9, color: '#b3ae9d', marginTop: 8 }}>封盤前可以自由加碼、也可以再押其他隊伍分散風險</p>}
+          </div>
+        )}
+
+        {/* 選隊 */}
+        <p style={{ fontSize: 10, fontWeight: 800, color: '#8a9a90', letterSpacing: 3, textTransform: 'uppercase', marginBottom: 10 }}>／ 選擇隊伍（可押多隊）</p>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 18 }}>
+          {sorted.map(t => {
+            const tid = String(t.id);
+            const isPicked = String(pickId) === tid;
+            const mine = Number(myMap[tid]) || 0;
+            return (
+              <div key={t.id} onClick={() => canBet && setPickId(tid)}
+                style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '11px 14px', clipPath: CUT(8), cursor: canBet ? 'pointer' : 'default', background: isPicked ? 'rgba(13,148,136,0.08)' : C.paper, border: `1.5px solid ${isPicked ? C.teal : C.line}`, transition: 'all 0.2s' }}>
+                <span style={{ width: 18, height: 18, clipPath: CUT(4), border: `1.5px solid ${isPicked ? C.teal : '#c9c4b2'}`, background: isPicked ? C.teal : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                  {isPicked && <Icon name="check" size={11} color="#fff" sw={2.6} />}
+                </span>
+                <span style={{ width: 18, height: 12, background: t.color || C.teal, clipPath: 'polygon(0 0, 100% 0, 82% 50%, 100% 100%, 0 100%)', flexShrink: 0 }} />
+                <span style={{ flex: 1, fontSize: 13, fontWeight: 800, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 6 }}>
+                  {t.name}
+                  {mine > 0 && <span style={{ fontSize: 8, fontWeight: 900, padding: '1px 7px', clipPath: CUT(3), background: C.goldBg, color: '#8a5a12', border: '1px solid rgba(183,121,31,0.3)', flexShrink: 0 }}>我押 ${mine}</span>}
+                </span>
+                <span style={{ fontSize: 10, fontWeight: 700, color: '#8a9a90', fontFamily: 'monospace', flexShrink: 0 }}>${totals[tid] || 0}</span>
+                <span style={{ fontSize: 12, fontWeight: 900, fontFamily: 'monospace', color: totals[tid] ? C.teal : '#b3ae9d', width: 62, textAlign: 'right', flexShrink: 0 }}>{oddsText(pool, totals[tid] || 0)}</span>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* 下注區 */}
+        {canBet ? (
+          <div style={{ position: 'relative', padding: 18, background: C.paper, clipPath: CUT(12), border: `1px solid ${C.line}` }}>
+            <Corners size={9} inset={4} color={C.gold} />
+            <p style={{ fontSize: 10, fontWeight: 800, color: '#8a9a90', letterSpacing: 3, textTransform: 'uppercase', marginBottom: 10 }}>／ 下注金額，可自行輸入（持有 ${coins}）</p>
+            <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+              <input type="number" min="1" value={amt} onChange={e => setAmt(e.target.value)} placeholder="輸入金額"
+                style={{ flex: 1, boxSizing: 'border-box', padding: '12px 14px', background: '#faf7ee', border: `1px solid ${C.line}`, clipPath: CUT(8), fontSize: 15, fontWeight: 800, fontFamily: 'monospace', outline: 'none', color: C.ink }} />
+              <button onClick={submit} disabled={!effTeam || !amt}
+                style={{ padding: '0 22px', clipPath: CUT(8), border: 'none', cursor: (!effTeam || !amt) ? 'default' : 'pointer', fontSize: 14, fontWeight: 900, letterSpacing: 2, background: (!effTeam || !amt) ? '#e8e3d4' : 'linear-gradient(135deg, #fbbf24, #d97706)', color: (!effTeam || !amt) ? '#a3a091' : '#451a03' }}>
+                下注
+              </button>
+            </div>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              {[50, 100, 200, 500].map(v => (
+                <button key={v} onClick={() => setAmt(String((Math.floor(Number(amt)) || 0) + v))} style={{ padding: '5px 12px', clipPath: CUT(5), border: `1px solid ${C.line}`, background: '#faf7ee', fontSize: 11, fontWeight: 800, color: C.ink, cursor: 'pointer', fontFamily: 'monospace' }}>+{v}</button>
+              ))}
+              <button onClick={() => setAmt(String(coins))} style={{ padding: '5px 12px', clipPath: CUT(5), border: '1px solid rgba(194,65,12,0.4)', background: 'rgba(194,65,12,0.06)', fontSize: 11, fontWeight: 900, color: C.red, cursor: 'pointer' }}>全押 ${coins}</button>
+            </div>
+            {!effTeam && <p style={{ fontSize: 10, color: '#b3ae9d', marginTop: 8 }}>先在上面選一支隊伍</p>}
+            {isDemo && <p style={{ fontSize: 10, color: C.red, fontWeight: 700, marginTop: 8 }}>※ 試玩／預覽模式僅供瀏覽，無法實際下注</p>}
+          </div>
+        ) : !meta.settled ? (
+          <div style={{ textAlign: 'center', padding: 18, background: '#f3efe2', clipPath: CUT(10), border: `1px dashed ${C.line}` }}>
+            <Icon name="lock" size={22} color="#8a9a90" style={{ margin: '0 auto 4px' }} />
+            <p style={{ fontSize: 12, fontWeight: 800, color: '#57534e' }}>賭盤已封盤，等待比賽結果</p>
+          </div>
+        ) : null}
+
+        <p style={{ fontSize: 9, color: '#b3ae9d', lineHeight: 1.8, marginTop: 14 }}>
+          ※ 賠率為即時預估，最終派彩以封盤時的彩池計算，金額無條件捨去至整數。若冠軍隊無人押中，全部賭金原額退還。
+        </p>
       </div>
     </div>
   );
@@ -1769,6 +2075,21 @@ function AdminPanel({ adminUser, onLogout, db, rtdb }) {
     return () => unsub();
   }, [rtdb]);
 
+  // 賭盤：注單與開盤狀態即時同步
+  const [adminBets, setAdminBets] = useState([]);
+  const [betMeta, setBetMeta] = useState({ open: false, settled: false });
+  const [winnerSel, setWinnerSel] = useState('');
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, 'raceBets'), (snap) => {
+      setAdminBets(snap.docs.map(d => ({ username: d.id, ...d.data() })));
+    }, () => {});
+    return () => unsub();
+  }, [db]);
+  useEffect(() => {
+    const unsub = onValue(ref(rtdb, 'betting'), (s) => setBetMeta(s.val() || { open: false, settled: false }));
+    return () => unsub();
+  }, [rtdb]);
+
   // ---------- 攤位 ----------
   const blankBooth = () => ({ id: '', name: '', ownerName: '', emoji: '🏮', side: 'top', description: '', plurkUrl: '', task: '', stampImageUrl: '', facadeImageUrl: '', stampHint: '', items: [] });
   const saveBooth = async () => {
@@ -1924,6 +2245,70 @@ function AdminPanel({ adminUser, onLogout, db, rtdb }) {
       await rtdbRemove(ref(rtdb, 'raceEvents'));
       toast('比賽已重置');
     } catch (e) { toast('重置失敗：' + e.message, 'err'); }
+  };
+
+  // ---------- 龍舟賭盤（彩池制） ----------
+  const betPoolAdmin = () => betPool(adminBets);   // 共用彩池計算（支援多隊注單）
+  const openBetting = async () => {
+    if (betMeta.settled && adminBets.length > 0) {
+      if (!window.confirm('上一輪注單還沒清空。建議先按「清空注單」再開新盤，直接開盤會把新舊注單混在一起。仍要直接開盤？')) return;
+    }
+    await rtdbSet(ref(rtdb, 'betting'), { open: true, settled: false });
+    toast('賭盤已開放下注');
+  };
+  const closeBetting = async () => {
+    await rtdbSet(ref(rtdb, 'betting/open'), false);
+    toast('賭盤已封盤');
+  };
+  // 開獎派彩：冠軍隊押注者按比例瓜分全池（無條件捨去）；無人押中則全額退還
+  const settleBets = async () => {
+    if (!winnerSel) return toast('請先選擇冠軍隊伍', 'err');
+    const team = teams.find(t => String(t.id) === String(winnerSel));
+    if (!team) return toast('找不到該隊伍', 'err');
+    if (!window.confirm(`確定以「${team.name}」為冠軍開獎？派彩會直接發進玩家帳戶，無法復原。`)) return;
+    setBusy(true);
+    try {
+      const snap = await getDocs(collection(db, 'raceBets'));
+      const bets = snap.docs.map(d => ({ username: d.id, ...d.data() }));
+      const { pool, totals } = betPool(bets);
+      const wid = String(winnerSel);
+      const winnerTotal = totals[wid] || 0;
+      if (winnerTotal === 0) {
+        // 無人押中冠軍：每人退還其所有賭金
+        for (const b of bets) {
+          const staked = Object.values(betDocMap(b)).reduce((s, a) => s + (Number(a) || 0), 0);
+          if (staked > 0) await updateDoc(doc(db, 'players', b.username), { coins: fsIncrement(staked) });
+          await updateDoc(doc(db, 'raceBets', b.username), { paid: true, payout: staked, result: 'refund' });
+        }
+        toast(`無人押中「${team.name}」，已全額退還 ${bets.length} 筆賭金（共 $${pool}）`);
+      } else {
+        // 依押中金額佔比瓜分全池（押其他隊的金額視為輸掉，進入彩池）
+        let paidOut = 0, winCount = 0;
+        for (const b of bets) {
+          const winAmt = Number(betDocMap(b)[wid]) || 0;
+          const payout = winAmt > 0 ? Math.floor(winAmt / winnerTotal * pool) : 0;
+          if (payout > 0) { await updateDoc(doc(db, 'players', b.username), { coins: fsIncrement(payout) }); paidOut += payout; winCount++; }
+          await updateDoc(doc(db, 'raceBets', b.username), { paid: true, payout, result: winAmt > 0 ? 'win' : 'lose' });
+        }
+        toast(`開獎完成！彩池 $${pool}，派彩 $${paidOut} 給 ${winCount} 位押中玩家`);
+      }
+      await rtdbSet(ref(rtdb, 'betting'), { open: false, settled: true, winnerId: winnerSel, winnerName: team.name, pool, settledAt: Date.now() });
+      setWinnerSel('');
+      loadAll();
+    } catch (e) { toast('開獎失敗：' + e.message, 'err'); }
+    finally { setBusy(false); }
+  };
+  const clearBets = async () => {
+    const unpaid = adminBets.filter(b => !b.paid).length;
+    if (!window.confirm(`確定清空全部 ${adminBets.length} 筆注單並重置賭盤？${unpaid > 0 ? `\n⚠ 其中 ${unpaid} 筆尚未開獎，清空「不會退款」，請先開獎或手動處理！` : ''}`)) return;
+    setBusy(true);
+    try {
+      const snap = await getDocs(collection(db, 'raceBets'));
+      for (const d of snap.docs) await deleteDoc(doc(db, 'raceBets', d.id));
+      await rtdbSet(ref(rtdb, 'betting'), { open: false, settled: false });
+      toast('注單已清空，可以開新一輪賭盤');
+    } catch (e) { toast('清空失敗：' + e.message, 'err'); }
+    finally { setBusy(false); }
   };
 
   // ---------- 樣式速記 ----------
@@ -2098,6 +2483,45 @@ function AdminPanel({ adminUser, onLogout, db, rtdb }) {
               <button onClick={addTeam} style={btn('#0d9488')}>＋ 加入隊伍</button>
               <button onClick={resetRace} style={btn('#7f1d1d')}>🔄 重置整場比賽</button>
             </div>
+
+            {/* 賭盤控制 */}
+            {(() => {
+              const { pool, totals } = betPoolAdmin();
+              return (
+                <div style={{ ...card, border: '1px solid #b7791f' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12, flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: 16 }}>🎰</span>
+                    <span style={{ fontSize: 13, fontWeight: 900, flex: 1 }}>龍舟賭盤（彩池制）</span>
+                    <span style={{ fontSize: 10, fontWeight: 800, padding: '3px 10px', borderRadius: 6, background: betMeta.settled ? '#78350f' : betMeta.open ? '#14532d' : '#334155', color: '#fff' }}>
+                      {betMeta.settled ? `已開獎：${betMeta.winnerName || ''}` : betMeta.open ? '開盤中' : '封盤中'}
+                    </span>
+                    {betMeta.open
+                      ? <button onClick={closeBetting} style={btn('#b45309')}>🔒 封盤</button>
+                      : <button onClick={openBetting} style={btn('#0d9488')}>🔔 開盤</button>}
+                  </div>
+                  <div style={{ fontSize: 11, color: '#94a3b8', marginBottom: 8, fontFamily: 'monospace' }}>總彩池 ${pool}・共 {adminBets.length} 筆注單</div>
+                  {teams.map(t => (
+                    <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 0', borderBottom: '1px solid #283548' }}>
+                      <span style={{ width: 10, height: 10, borderRadius: 2, background: t.color, flexShrink: 0 }} />
+                      <span style={{ flex: 1, fontSize: 11, fontWeight: 700 }}>{t.name}</span>
+                      <span style={{ fontSize: 10, fontFamily: 'monospace', color: '#94a3b8' }}>{adminBets.filter(b => (Number(betDocMap(b)[String(t.id)]) || 0) > 0).length} 人押・${totals[String(t.id)] || 0}</span>
+                      <span style={{ fontSize: 11, fontFamily: 'monospace', fontWeight: 900, color: totals[String(t.id)] ? '#34d399' : '#475569', width: 60, textAlign: 'right' }}>
+                        {totals[String(t.id)] ? (pool / totals[String(t.id)]).toFixed(1) + 'x' : '—'}
+                      </span>
+                    </div>
+                  ))}
+                  <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+                    <select style={{ ...inp, flex: 1, minWidth: 140 }} value={winnerSel} onChange={e => setWinnerSel(e.target.value)}>
+                      <option value="">— 選擇冠軍隊伍 —</option>
+                      {teams.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                    </select>
+                    <button onClick={settleBets} disabled={busy || betMeta.settled} style={btn(betMeta.settled ? '#475569' : '#b7791f')}>{busy ? '處理中...' : '🏆 開獎派彩'}</button>
+                    <button onClick={clearBets} disabled={busy} style={btn('#7f1d1d')}>🗑 清空注單（開新一輪）</button>
+                  </div>
+                  <p style={{ fontSize: 9, color: '#64748b', marginTop: 8 }}>流程：開盤 → 玩家下注 → 開賽前封盤 → 比賽結束選冠軍開獎 → 清空注單準備下一輪。無人押中冠軍時會自動全額退款。</p>
+                </div>
+              );
+            })()}
 
             {teams.map(team => {
               const sel = eventSel[team.id] || '';
