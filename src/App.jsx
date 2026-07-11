@@ -2046,6 +2046,8 @@ function AdminPanel({ adminUser, onLogout, db, rtdb }) {
       setBoothList(arr);
       const ps = await getDocs(collection(db, 'players'));
       setPlayerList(ps.docs.map(d => ({ username: d.id, ...d.data() })));
+      const br = await getDocs(collection(db, 'betRounds'));
+      setBetRounds(br.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => Number(b.id) - Number(a.id)));
       const st = await getDoc(doc(db, 'settings', 'general'));
       if (st.exists()) {
         const sd = st.data();
@@ -2077,6 +2079,7 @@ function AdminPanel({ adminUser, onLogout, db, rtdb }) {
 
   // 賭盤：注單與開盤狀態即時同步
   const [adminBets, setAdminBets] = useState([]);
+  const [betRounds, setBetRounds] = useState([]);   // 每輪開獎歷史
   const [betMeta, setBetMeta] = useState({ open: false, settled: false });
   const [winnerSel, setWinnerSel] = useState('');
   useEffect(() => {
@@ -2320,25 +2323,35 @@ function AdminPanel({ adminUser, onLogout, db, rtdb }) {
       const { pool, totals } = betPool(bets);
       const wid = String(winnerSel);
       const winnerTotal = totals[wid] || 0;
+      const roundResults = [];   // 本輪每位玩家的損益（存入歷史紀錄）
       if (winnerTotal === 0) {
         // 無人押中冠軍：每人退還其所有賭金
         for (const b of bets) {
           const staked = Object.values(betDocMap(b)).reduce((s, a) => s + (Number(a) || 0), 0);
           if (staked > 0) await updateDoc(doc(db, 'players', b.username), { coins: fsIncrement(staked) });
           await updateDoc(doc(db, 'raceBets', b.username), { paid: true, payout: staked, result: 'refund' });
+          roundResults.push({ username: b.username, staked, winAmt: 0, payout: staked, net: 0, result: 'refund' });
         }
         toast(`無人押中「${team.name}」，已全額退還 ${bets.length} 筆賭金（共 $${pool}）`);
       } else {
         // 依押中金額佔比瓜分全池（押其他隊的金額視為輸掉，進入彩池）
         let paidOut = 0, winCount = 0;
         for (const b of bets) {
-          const winAmt = Number(betDocMap(b)[wid]) || 0;
+          const m = betDocMap(b);
+          const staked = Object.values(m).reduce((s, a) => s + (Number(a) || 0), 0);
+          const winAmt = Number(m[wid]) || 0;
           const payout = winAmt > 0 ? Math.floor(winAmt / winnerTotal * pool) : 0;
           if (payout > 0) { await updateDoc(doc(db, 'players', b.username), { coins: fsIncrement(payout) }); paidOut += payout; winCount++; }
           await updateDoc(doc(db, 'raceBets', b.username), { paid: true, payout, result: winAmt > 0 ? 'win' : 'lose' });
+          roundResults.push({ username: b.username, staked, winAmt, payout, net: payout - staked, result: winAmt > 0 ? 'win' : 'lose' });
         }
         toast(`開獎完成！彩池 $${pool}，派彩 $${paidOut} 給 ${winCount} 位押中玩家`);
       }
+      // ★ 每輪永久紀錄（清空注單也不會消失，用於賭神排行）
+      await setDoc(doc(db, 'betRounds', String(Date.now())), {
+        winnerId: wid, winnerName: team.name, pool, winnerTotal,
+        settledAt: Timestamp.now(), results: roundResults,
+      });
       await rtdbSet(ref(rtdb, 'betting'), { open: false, settled: true, winnerId: winnerSel, winnerName: team.name, pool, settledAt: Date.now() });
       setWinnerSel('');
       loadAll();
@@ -2392,6 +2405,7 @@ function AdminPanel({ adminUser, onLogout, db, rtdb }) {
           { id: 'booths', label: '🏮 攤位管理' },
           { id: 'players', label: '👥 玩家管理' },
           { id: 'race', label: '🚣 龍舟賽控制' },
+          { id: 'betlog', label: '💰 賭盤紀錄' },
           { id: 'settings', label: '⚙️ 設定' },
         ].map(t => (
           <button key={t.id} onClick={() => { setTab(t.id); if (t.id !== 'booths') setEditing(null); }} style={{ flexShrink: 0, padding: '9px 16px', borderRadius: '10px 10px 0 0', border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 800, background: tab === t.id ? '#1e293b' : 'transparent', color: tab === t.id ? '#fff' : '#64748b' }}>{t.label}</button>
@@ -2621,6 +2635,65 @@ function AdminPanel({ adminUser, onLogout, db, rtdb }) {
               );
             })}
             {teams.length === 0 && <div style={{ ...card, textAlign: 'center', color: '#64748b', fontSize: 12 }}>還沒有隊伍，先在上面加入吧</div>}
+          </>
+        )}
+
+        {/* ===== 賭盤紀錄 ===== */}
+        {tab === 'betlog' && (
+          <>
+            {(() => {
+              const agg = {};
+              betRounds.forEach(r => (r.results || []).forEach(x => {
+                if (!agg[x.username]) agg[x.username] = { staked: 0, payout: 0, net: 0, wins: 0, rounds: 0 };
+                const a = agg[x.username];
+                a.staked += Number(x.staked) || 0;
+                a.payout += Number(x.payout) || 0;
+                a.net += Number(x.net) || 0;
+                if (x.result === 'win') a.wins++;
+                a.rounds++;
+              }));
+              const rank = Object.entries(agg).map(([username, v]) => ({ username, ...v })).sort((a, b) => b.net - a.net);
+              return (
+                <div style={{ ...card, border: '1px solid #b7791f' }}>
+                  <p style={{ fontSize: 13, fontWeight: 900, marginBottom: 4 }}>💰 累計賭神榜（依淨損益排序）</p>
+                  <p style={{ fontSize: 10, color: '#64748b', marginBottom: 10 }}>統計全部 {betRounds.length} 輪開獎・淨損益 = 總派彩 − 總下注</p>
+                  {rank.length === 0 && <p style={{ fontSize: 11, color: '#64748b' }}>還沒有開獎紀錄，第一次開獎後這裡會自動累計</p>}
+                  {rank.map((p, i) => (
+                    <div key={p.username} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 0', borderBottom: '1px solid #283548', flexWrap: 'wrap' }}>
+                      <span style={{ width: 26, fontSize: 12, fontWeight: 900, fontFamily: 'monospace', color: i < 3 ? '#fbbf24' : '#64748b', flexShrink: 0 }}>#{i + 1}</span>
+                      <span style={{ flex: 1, fontSize: 12, fontWeight: 800, minWidth: 80 }}>{p.username}</span>
+                      <span style={{ fontSize: 9, color: '#94a3b8', fontFamily: 'monospace' }}>參與 {p.rounds} 輪・中 {p.wins} 次</span>
+                      <span style={{ fontSize: 10, color: '#94a3b8', fontFamily: 'monospace' }}>下注 ${p.staked}・派彩 ${p.payout}</span>
+                      <span style={{ fontSize: 12, fontWeight: 900, fontFamily: 'monospace', width: 76, textAlign: 'right', color: p.net > 0 ? '#34d399' : p.net < 0 ? '#f87171' : '#94a3b8' }}>{p.net > 0 ? '+' : ''}{p.net}</span>
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
+            {betRounds.map(r => (
+              <div key={r.id} style={card}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: 11, fontWeight: 900, flex: 1 }}>🏆 冠軍「{r.winnerName}」・彩池 ${r.pool}</span>
+                  <span style={{ fontSize: 9, color: '#64748b', fontFamily: 'monospace' }}>{new Date(Number(r.id)).toLocaleString('zh-TW', { hour12: false })}</span>
+                  <button onClick={async () => {
+                    if (!window.confirm('刪除這一輪的紀錄？（不影響已派彩的金額）')) return;
+                    await deleteDoc(doc(db, 'betRounds', r.id));
+                    toast('紀錄已刪除'); loadAll();
+                  }} style={{ ...btn('#7f1d1d'), padding: '5px 10px', fontSize: 10 }}>刪除</button>
+                </div>
+                {(r.results || []).slice().sort((a, b) => (b.payout || 0) - (a.payout || 0)).map((x, i) => (
+                  <div key={x.username + i} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 0', borderBottom: '1px solid #283548' }}>
+                    <span style={{ fontSize: 9, fontWeight: 800, padding: '1px 8px', borderRadius: 5, flexShrink: 0, background: x.result === 'win' ? '#14532d' : x.result === 'refund' ? '#334155' : '#450a0a', color: x.result === 'win' ? '#86efac' : x.result === 'refund' ? '#cbd5e1' : '#fca5a5' }}>
+                      {x.result === 'win' ? '押中' : x.result === 'refund' ? '退款' : '未中'}
+                    </span>
+                    <span style={{ flex: 1, fontSize: 11, fontWeight: 700 }}>{x.username}</span>
+                    <span style={{ fontSize: 10, color: '#94a3b8', fontFamily: 'monospace' }}>下注 ${x.staked}・獲得 ${x.payout}</span>
+                    <span style={{ fontSize: 11, fontWeight: 900, fontFamily: 'monospace', width: 64, textAlign: 'right', color: (x.net || 0) > 0 ? '#34d399' : (x.net || 0) < 0 ? '#f87171' : '#94a3b8' }}>{(x.net || 0) > 0 ? '+' : ''}{x.net || 0}</span>
+                  </div>
+                ))}
+              </div>
+            ))}
+            {betRounds.length === 0 && <div style={{ ...card, textAlign: 'center', color: '#64748b', fontSize: 12 }}>尚無開獎紀錄</div>}
           </>
         )}
 
