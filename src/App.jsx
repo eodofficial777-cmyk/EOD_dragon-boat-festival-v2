@@ -2155,6 +2155,35 @@ function AdminPanel({ adminUser, onLogout, db, rtdb }) {
       setCoinInput(p => ({ ...p, [username]: '' })); loadAll();
     } catch (e) { toast('更新失敗：' + e.message, 'err'); }
   };
+  const renamePlayer = async (oldName) => {
+    const input = window.prompt(`將「${oldName}」改名為：`, '');
+    if (input == null) return;
+    const newName = input.trim();
+    if (!newName || newName === oldName) return;
+    setBusy(true);
+    try {
+      const exist = await getDoc(doc(db, 'players', newName));
+      if (exist.exists()) { toast('新名稱已有人使用', 'err'); return; }
+      const oldSnap = await getDoc(doc(db, 'players', oldName));
+      if (!oldSnap.exists()) { toast('找不到原玩家', 'err'); return; }
+      // 複製玩家資料到新名稱
+      await setDoc(doc(db, 'players', newName), oldSnap.data());
+      // 集章紀錄跟著改名（排行榜與集章名單才不會斷）
+      const logs = await getDocs(query(collection(db, 'stampLogs'), where('username', '==', oldName)));
+      for (const d of logs.docs) await updateDoc(doc(db, 'stampLogs', d.id), { username: newName });
+      // 賭盤注單跟著搬
+      const betSnap = await getDoc(doc(db, 'raceBets', oldName));
+      if (betSnap.exists()) {
+        await setDoc(doc(db, 'raceBets', newName), betSnap.data());
+        await deleteDoc(doc(db, 'raceBets', oldName));
+      }
+      // 最後刪除舊文件
+      await deleteDoc(doc(db, 'players', oldName));
+      toast(`已改名：${oldName} → ${newName}，請玩家改用新名稱＋原密碼登入`);
+      loadAll();
+    } catch (e) { toast('改名失敗：' + e.message, 'err'); }
+    finally { setBusy(false); }
+  };
   const deletePlayer = async (username) => {
     if (!window.confirm(`確定刪除玩家「${username}」？`)) return;
     try { await deleteDoc(doc(db, 'players', username)); toast('已刪除'); loadAll(); }
@@ -2228,6 +2257,24 @@ function AdminPanel({ adminUser, onLogout, db, rtdb }) {
       setEventSel(p => ({ ...p, [team.id]: '' }));
       toast(`${team.name}：骰點 ${rollSum}${ev ? `，${ev.name} ${ev.delta >= 0 ? '+' : ''}${ev.delta}` : ''} → 前進 ${move}`);
     } catch (e) { toast('結算失敗：' + e.message, 'err'); }
+  };
+
+  // 只歸零打氣數（不動分數與事件）
+  const clearCheers = async () => {
+    if (!window.confirm('確定把所有隊伍的打氣數歸零？（分數不受影響）')) return;
+    try {
+      for (const t of teams) await rtdbSet(ref(rtdb, `race/${t.id}/cheers`), 0);
+      toast('打氣數已全部歸零');
+    } catch (e) { toast('歸零失敗：' + e.message, 'err'); }
+  };
+  // 只清除事件紀錄（跑馬燈＋各隊事件標籤，不動分數）
+  const clearEvents = async () => {
+    if (!window.confirm('確定清除所有事件紀錄？跑馬燈與各隊的事件標籤都會消失（分數不受影響）')) return;
+    try {
+      await rtdbRemove(ref(rtdb, 'raceEvents'));
+      for (const t of teams) await rtdbRemove(ref(rtdb, `race/${t.id}/lastEvent`));
+      toast('事件紀錄已清除');
+    } catch (e) { toast('清除失敗：' + e.message, 'err'); }
   };
 
   // ★ 重置比賽：分數/打氣/骰點/事件全清，含事件紀錄
@@ -2465,6 +2512,7 @@ function AdminPanel({ adminUser, onLogout, db, rtdb }) {
                   <span style={{ fontSize: 10, color: '#94a3b8', fontFamily: 'monospace' }}>🪙{p.coins ?? 0}・📮{(p.stamps || []).length}章・🛍️{(p.inventory || []).length}件</span>
                   <input style={{ ...inp, width: 84, padding: '6px 8px' }} placeholder="設金額" value={coinInput[p.username] || ''} onChange={e => setCoinInput(prev => ({ ...prev, [p.username]: e.target.value }))} />
                   <button onClick={() => setPlayerCoins(p.username)} style={{ ...btn('#2563eb'), padding: '7px 12px' }}>設定</button>
+                  <button onClick={() => renamePlayer(p.username)} disabled={busy} style={{ ...btn('#475569'), padding: '7px 12px' }}>改名</button>
                   <button onClick={() => deletePlayer(p.username)} style={{ ...btn('#7f1d1d'), padding: '7px 12px' }}>刪除</button>
                 </div>
               ))}
@@ -2481,6 +2529,8 @@ function AdminPanel({ adminUser, onLogout, db, rtdb }) {
               <div><label style={lbl}>顏色</label><input type="color" style={{ ...inp, width: 60, padding: 4, height: 38 }} value={newTeam.color} onChange={e => setNewTeam({ ...newTeam, color: e.target.value })} /></div>
               <div style={{ flex: 2, minWidth: 140 }}><label style={lbl}>隊旗圖網址（選填）</label><input style={inp} value={newTeam.flagImageUrl} onChange={e => setNewTeam({ ...newTeam, flagImageUrl: e.target.value })} /></div>
               <button onClick={addTeam} style={btn('#0d9488')}>＋ 加入隊伍</button>
+              <button onClick={clearCheers} style={btn('#475569')}>📣 歸零打氣</button>
+              <button onClick={clearEvents} style={btn('#475569')}>🧹 清除事件紀錄</button>
               <button onClick={resetRace} style={btn('#7f1d1d')}>🔄 重置整場比賽</button>
             </div>
 
