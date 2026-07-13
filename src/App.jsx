@@ -2431,23 +2431,81 @@ function AdminPanel({ adminUser, onLogout, db, rtdb }) {
                 </div>
               ))}
             </div>
-            <div style={card}>
-              <p style={{ fontSize: 12, fontWeight: 800, marginBottom: 10 }}>各攤位集章統計</p>
-              {boothList.map(b => {
-                const cnt = playerList.filter(p => (p.stamps || []).includes(b.id)).length;
-                return (
-                  <div key={b.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 0', borderBottom: '1px solid #283548' }}>
-                    <span style={{ fontSize: 15 }}>{b.emoji}</span>
-                    <span style={{ flex: 1, fontSize: 12, fontWeight: 700 }}>{b.name}</span>
-                    <span style={{ width: 120, height: 5, background: '#0f172a', borderRadius: 3, position: 'relative' }}>
-                      <span style={{ position: 'absolute', left: 0, top: 0, bottom: 0, borderRadius: 3, width: `${playerList.length ? (cnt / playerList.length) * 100 : 0}%`, background: '#0d9488' }} />
-                    </span>
-                    <span style={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 800, width: 30, textAlign: 'right' }}>{cnt}</span>
-                  </div>
-                );
-              })}
-              {boothList.length === 0 && <p style={{ fontSize: 11, color: '#64748b' }}>還沒有攤位資料</p>}
-            </div>
+            {(() => {
+              // 從玩家購物袋彙總每攤營業額；集章數從玩家印章彙總
+              const stats = boothList.map(b => {
+                let revenue = 0, salesCount = 0;
+                playerList.forEach(p => (p.inventory || []).forEach(it => {
+                  if (it.boothId === b.id) { revenue += Number(it.price) || 0; salesCount++; }
+                }));
+                const stampCnt = playerList.filter(p => (p.stamps || []).includes(b.id)).length;
+                return { ...b, revenue, salesCount, stampCnt };
+              });
+              const byRev = [...stats].sort((a, b) => b.revenue - a.revenue || b.salesCount - a.salesCount);
+              const byStamp = [...stats].sort((a, b) => b.stampCnt - a.stampCnt);
+              const maxRev = Math.max(1, ...stats.map(s => s.revenue));
+              const maxStamp = Math.max(1, ...stats.map(s => s.stampCnt));
+              // 玩家集章排行（並列名次：同章數同名次）
+              const ps = [...playerList].sort((a, b) => (b.stamps || []).length - (a.stamps || []).length || a.username.localeCompare(b.username));
+              let prevC = null, prevR = 0;
+              const ranked = ps.map((p, i) => {
+                const n = (p.stamps || []).length;
+                const r = n === prevC ? prevR : i + 1;
+                prevC = n; prevR = r;
+                return { ...p, rank: r };
+              });
+              const rankColor = (r) => r === 1 ? '#fbbf24' : r === 2 ? '#cbd5e1' : r === 3 ? '#d97706' : '#64748b';
+              return (<>
+                {/* 攤位營業額排行 */}
+                <div style={{ ...card, border: '1px solid #b7791f' }}>
+                  <p style={{ fontSize: 12, fontWeight: 900, marginBottom: 2 }}>🏪 攤位營業額排行</p>
+                  <p style={{ fontSize: 9, color: '#64748b', marginBottom: 10 }}>從玩家購物袋即時彙總，依銷售總額排序</p>
+                  {byRev.map((b, i) => (
+                    <div key={b.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', borderBottom: '1px solid #283548' }}>
+                      <span style={{ width: 26, fontSize: 12, fontWeight: 900, fontFamily: 'monospace', color: rankColor(i + 1), flexShrink: 0 }}>#{i + 1}</span>
+                      <span style={{ fontSize: 15, flexShrink: 0 }}>{b.emoji}</span>
+                      <span style={{ flex: 1, fontSize: 12, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.name}</span>
+                      <span style={{ width: 100, height: 5, background: '#0f172a', borderRadius: 3, position: 'relative', flexShrink: 0 }}>
+                        <span style={{ position: 'absolute', left: 0, top: 0, bottom: 0, borderRadius: 3, width: `${(b.revenue / maxRev) * 100}%`, background: '#b7791f' }} />
+                      </span>
+                      <span style={{ fontSize: 10, color: '#94a3b8', fontFamily: 'monospace', flexShrink: 0 }}>{b.salesCount} 件</span>
+                      <span style={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 900, width: 62, textAlign: 'right', color: '#fbbf24', flexShrink: 0 }}>${b.revenue}</span>
+                    </div>
+                  ))}
+                  {boothList.length === 0 && <p style={{ fontSize: 11, color: '#64748b' }}>還沒有攤位資料</p>}
+                </div>
+                {/* 攤位集章排行 */}
+                <div style={card}>
+                  <p style={{ fontSize: 12, fontWeight: 900, marginBottom: 10 }}>📮 攤位集章排行</p>
+                  {byStamp.map((b, i) => (
+                    <div key={b.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', borderBottom: '1px solid #283548' }}>
+                      <span style={{ width: 26, fontSize: 12, fontWeight: 900, fontFamily: 'monospace', color: rankColor(i + 1), flexShrink: 0 }}>#{i + 1}</span>
+                      <span style={{ fontSize: 15, flexShrink: 0 }}>{b.emoji}</span>
+                      <span style={{ flex: 1, fontSize: 12, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.name}</span>
+                      <span style={{ width: 100, height: 5, background: '#0f172a', borderRadius: 3, position: 'relative', flexShrink: 0 }}>
+                        <span style={{ position: 'absolute', left: 0, top: 0, bottom: 0, borderRadius: 3, width: `${(b.stampCnt / maxStamp) * 100}%`, background: '#0d9488' }} />
+                      </span>
+                      <span style={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 800, width: 44, textAlign: 'right', flexShrink: 0 }}>{b.stampCnt} 人</span>
+                    </div>
+                  ))}
+                  {boothList.length === 0 && <p style={{ fontSize: 11, color: '#64748b' }}>還沒有攤位資料</p>}
+                </div>
+                {/* 玩家集章排行 */}
+                <div style={card}>
+                  <p style={{ fontSize: 12, fontWeight: 900, marginBottom: 2 }}>👑 玩家集章排行</p>
+                  <p style={{ fontSize: 9, color: '#64748b', marginBottom: 10 }}>同章數並列名次，與玩家端排行榜一致</p>
+                  {ranked.map((p) => (
+                    <div key={p.username} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', borderBottom: '1px solid #283548' }}>
+                      <span style={{ width: 26, fontSize: 12, fontWeight: 900, fontFamily: 'monospace', color: rankColor(p.rank), flexShrink: 0 }}>#{p.rank}</span>
+                      <span style={{ flex: 1, fontSize: 12, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.username}</span>
+                      <span style={{ fontSize: 10, color: '#94a3b8', fontFamily: 'monospace', flexShrink: 0 }}>🪙 {p.coins ?? 0}</span>
+                      <span style={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 900, width: 44, textAlign: 'right', color: '#34d399', flexShrink: 0 }}>{(p.stamps || []).length} 章</span>
+                    </div>
+                  ))}
+                  {playerList.length === 0 && <p style={{ fontSize: 11, color: '#64748b' }}>還沒有玩家</p>}
+                </div>
+              </>);
+            })()}
           </>
         )}
 
